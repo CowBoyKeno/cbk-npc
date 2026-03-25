@@ -8,9 +8,11 @@
    - `Config.EnableNPCs`
    - `Config.PopulationDensity`
    - `Config.VehicleSettings`
+   - `Config.Commands.panelKey`
    - `Config.Security.adminIdentifiers`
 4. Restart the resource or the server.
 5. Join the server and run `/npcstatus`.
+6. Press your configured panel key if you want to use the runtime editor.
 
 ## Runtime Model
 
@@ -58,6 +60,23 @@ After boot:
 2. Run `/npccount` to see recent nearby ambient counts.
 3. Run `/npcvalidate` to confirm your config does not normalize unexpectedly.
 4. Run `/npcreload` after edits instead of restarting the whole server.
+5. Open the panel with `Config.Commands.panelKey` and confirm it shows the current revision.
+
+## Runtime Panel
+
+The runtime panel is keybind-driven.
+
+- Open the panel with `/cbknpc` (or your configured `panelCommand`) in addition to pressing the key bound by `Config.Commands.panelKey`.
+- The `_bind_<key>` command that backs the keybind is derived from `Config.Commands.panelCommand` so that `/cbknpc_bind_<key>` also works automatically.
+- The panel is grouped into `Core Runtime`, `Ped AI`, `Traffic Systems`, `World & Scenarios`, and `Maintenance`.
+- Search/filtering in the panel is client-side, but every live edit is still server-validated before it applies.
+
+Profile workflow:
+
+- `Save Profile`: saves the current live state to the `runtime` panel profile.
+- `Load Profile`: reloads the `runtime` panel profile into the active runtime config.
+- `Save As` / `Load Selected`: work with named profiles under `profiles/cbk_panel/`.
+- `/cbkpanelunlock` or your configured `panelUnlockCommand`: releases a stuck panel lock.
 
 ## 120-Player Baseline
 
@@ -81,7 +100,6 @@ For full audit rationale and risk notes, see `CODE-AUDIT-03-21-2026.md`.
 - Keep `Config.Advanced.standaloneAmbientControl = true`.
 - Use `Config.SpawnControl.disableAmbientPeds = true` if you want hard ambient-ped suppression.
 - Use `Config.VehicleSettings.enableTraffic = false` if you want zero moving traffic.
-- Use `Config.VehicleSettings.trafficDensityOverridePopulation = true` only when you want vehicle density to stop following `Config.PopulationDensity.vehicleDensity`.
 - Keep `Config.VehicleSettings.preservePlayerLastVehicle = true` if you suppress ambient police traffic and do not want your recently used vehicle cleaned.
 
 ## Emergency Vehicle Testing
@@ -98,6 +116,10 @@ To verify the emergency-response layer:
 
 - `/npcreload`: reloads and re-syncs config.
 - `/npctoggle`: master NPC enable switch.
+- Panel open is bound to `Config.Commands.panelKey`, not a normal typed chat command.
+- `/cbkpanelsave`: save current runtime panel profile.
+- `/cbkpanelload`: load current runtime panel profile.
+- `/cbkpanelunlock`: release a stuck panel lock.
 - `/npccount`: recent nearby ambient ped and vehicle totals.
 - `/npctrafficstats`: current traffic-context telemetry snapshot for spatial-index health checks.
 - `/npctrafficstatsreset`: reset traffic-context telemetry window before a fresh load test.
@@ -112,7 +134,8 @@ To verify the emergency-response layer:
 - Confirm `Config.EnableNPCs = true`.
 - Confirm the relevant density value is above `0.0`.
 - If time-based settings are enabled, remember they can override daytime and nighttime density.
-- If `trafficDensityOverridePopulation = true`, vehicle density follows `Config.VehicleSettings.trafficDensity`, not `Config.PopulationDensity.vehicleDensity`.
+- If traffic is enabled, moving vehicle density comes from `Config.PopulationDensity.vehicleDensity` or the active time-based vehicle density override.
+- If `SpawnControl` is enabled, its hard suppression flags still win over density sliders.
 
 ### Roads are still too busy
 
@@ -133,6 +156,12 @@ To verify the emergency-response layer:
 - Verify your identifier is in `Config.Security.adminIdentifiers`.
 - If using ACE, verify `Config.Security.allowAcePermissions = true`.
 - Check `Config.Commands.requirePermission`.
+
+### Ped AI changes seem inconsistent
+
+- Live edits to `NPCBehavior.*` and `Relationships.*` now force a nearby ambient ped refresh, but some changes are still most visible on newly managed ambient peds.
+- `disableNPCWeapons` is the clearest example because GTA does not automatically re-arm the same already-disarmed ambient ped later.
+- Relationship changes now target player and non-player groups separately; if a relationship edit still looks wrong, retest away from scripted or mission entities because `cbk-npc` only manages ambient peds.
 
 ## Legacy Notes
 

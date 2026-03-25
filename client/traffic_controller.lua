@@ -23,11 +23,49 @@ local lastPlayerVehicleExitAt = 0
 local lastWantedStaticKey = nil
 local lastVehicleSuppressionKey = nil
 local lastSuppressionSweepAt = 0
+local masterDisableStateApplied = false
+local lastEnableNPCsState = nil
 
-local function clamp(value, minValue, maxValue)
-    if value < minValue then return minValue end
-    if value > maxValue then return maxValue end
-    return value
+local function safeRequire(moduleName)
+    if type(moduleName) ~= 'string' or moduleName == '' then
+        return nil
+    end
+
+    local requireFn = require
+    if type(requireFn) ~= 'function' then
+        return nil
+    end
+
+    local ok, result = pcall(requireFn, moduleName)
+    if ok and type(result) == 'table' then
+        return result
+    end
+
+    return nil
+end
+
+local function resolveUtils()
+    if type(CBKAI.Utils) == 'table' then
+        return CBKAI.Utils
+    end
+    local loaded = safeRequire('utils') or safeRequire('shared.utils')
+    if type(loaded) == 'table' then
+        CBKAI.Utils = loaded
+        return loaded
+    end
+    error('cbk-npc: utils module unavailable')
+end
+
+local Utils = resolveUtils()
+local clamp = Utils.clamp
+local EntityGuards = CBKAI.ClientEntityGuards or {}
+
+local function isAmbientVehicleEntity(vehicle)
+    if type(EntityGuards.IsAmbientVehicle) == 'function' then
+        return EntityGuards.IsAmbientVehicle(vehicle)
+    end
+
+    return vehicle ~= 0 and DoesEntityExist(vehicle) and not IsEntityAMissionEntity(vehicle)
 end
 
 local function suppressionMultiplier(level)
@@ -108,6 +146,9 @@ local function deleteVehicleSafely(vehicle)
     if vehicle == 0 or not DoesEntityExist(vehicle) then
         return
     end
+    if not isAmbientVehicleEntity(vehicle) then
+        return
+    end
 
     local timeout = GetGameTimer() + 250
     while not NetworkHasControlOfEntity(vehicle) and GetGameTimer() < timeout do
@@ -179,6 +220,7 @@ end
 
 local function applyWantedSettings(cfg)
     local wanted = cfg.WantedSystem or {}
+    local npcBehavior = cfg.NPCBehavior or {}
     local crimeReportsEnabled = wanted.npcReportCrimes == true
         and (wanted.npcReportVehicleTheft == true
             or wanted.npcReportAssault == true
@@ -225,7 +267,12 @@ local function applyWantedSettings(cfg)
         lastWantedStaticKey = staticKey
     end
 
-    SetPoliceIgnorePlayer(PlayerId(), wanted.disablePoliceChase == true or wanted.disablePoliceResponse == true)
+    SetPoliceIgnorePlayer(
+        PlayerId(),
+        wanted.disablePoliceChase == true
+            or wanted.disablePoliceResponse == true
+            or npcBehavior.ignorePlayer == true
+    )
 
     if wanted.disableWantedLevel then
         SetMaxWantedLevel(0)
@@ -239,12 +286,19 @@ end
 local function trimAmbientVehicles(cfg, vehicles, playerCoords, playerVehicle)
     local maxVehicles = (cfg.VehicleSettings and cfg.VehicleSettings.maxVehicles) or 100
     local multiplier = suppressionMultiplier((cfg.Advanced and cfg.Advanced.suppressionLevel) or 'medium')
+    local densityApi = CBKAI.ClientDensity or {}
+    local vehicleDensityFactor = type(densityApi.GetEffectiveVehicleDensityFactor) == 'function'
+        and densityApi.GetEffectiveVehicleDensityFactor(cfg)
+        or 1.0
     maxVehicles = math.max(0, math.floor(maxVehicles * multiplier))
+    if math.max(0.0, math.min(1.0, vehicleDensityFactor)) <= 0.0 then
+        maxVehicles = 0
+    end
     local ambientVehicles = {}
 
     for i = 1, #vehicles do
         local vehicle = vehicles[i]
-        if vehicle ~= 0 and DoesEntityExist(vehicle) and vehicle ~= playerVehicle and not isProtectedPlayerVehicle(vehicle, cfg, playerCoords) then
+        if isAmbientVehicleEntity(vehicle) and vehicle ~= playerVehicle and not isProtectedPlayerVehicle(vehicle, cfg, playerCoords) then
             local driver = GetPedInVehicleSeat(vehicle, -1)
             if driver == 0 or not IsPedAPlayer(driver) then
                 ambientVehicles[#ambientVehicles + 1] = vehicle
@@ -330,7 +384,7 @@ local function enforceVehicleSuppression(cfg, vehicles, playerCoords)
 
     for i = 1, #vehicles do
         local vehicle = vehicles[i]
-        if vehicle ~= 0 and DoesEntityExist(vehicle) and #(GetEntityCoords(vehicle) - playerCoords) <= maxDistance then
+        if isAmbientVehicleEntity(vehicle) and #(GetEntityCoords(vehicle) - playerCoords) <= maxDistance then
             if isProtectedPlayerVehicle(vehicle, cfg, playerCoords) then
                 goto continue_vehicle
             end
@@ -379,6 +433,66 @@ local function enforceVehicleSuppression(cfg, vehicles, playerCoords)
     elseif settings.maxVehicles then
         trimAmbientVehicles(cfg, vehicles, playerCoords, playerVehicle)
     end
+end
+
+local function resetStaticVehicleSuppression()
+    SetVehicleModelIsSuppressed(GetHashKey('police'), false)
+    SetVehicleModelIsSuppressed(GetHashKey('police2'), false)
+    SetVehicleModelIsSuppressed(GetHashKey('police3'), false)
+    SetVehicleModelIsSuppressed(GetHashKey('police4'), false)
+    SetVehicleModelIsSuppressed(GetHashKey('policeb'), false)
+    SetVehicleModelIsSuppressed(GetHashKey('policet'), false)
+    SetVehicleModelIsSuppressed(GetHashKey('ambulance'), false)
+    SetVehicleModelIsSuppressed(GetHashKey('firetruk'), false)
+    SetRandomBoats(true)
+    SetRandomTrains(true)
+    lastVehicleSuppressionKey = nil
+end
+
+local function resetWantedSettings()
+    for i = 1, 15 do
+        EnableDispatchService(i, true)
+    end
+
+    SetDispatchCopsForPlayer(PlayerId(), true)
+    SetCreateRandomCops(true)
+    SetCreateRandomCopsNotOnScenarios(true)
+    SetCreateRandomCopsOnScenarios(true)
+    SetAudioFlag('PoliceScannerDisabled', false)
+    EnableDispatchService(14, true)
+    SetPoliceIgnorePlayer(PlayerId(), false)
+    SetMaxWantedLevel(5)
+    lastWantedStaticKey = nil
+end
+
+local function resetTrafficControllerState()
+    for vehicle, _ in pairs(speedLimitedVehicles) do
+        resetVehicleEmergencyState(vehicle)
+    end
+
+    for vehicle, _ in pairs(hornMutedVehicles) do
+        resetVehicleEmergencyState(vehicle)
+    end
+
+    for vehicle, _ in pairs(globalHornMutedVehicles) do
+        resetVehicleEmergencyState(vehicle)
+    end
+
+    for vehicle, driver in pairs(speechMutedDrivers) do
+        if DoesEntityExist(driver) and CBKAI.ClientState.config.NPCBehavior.disableAmbientSpeech ~= true then
+            StopPedSpeaking(driver, false)
+        end
+        speechMutedDrivers[vehicle] = nil
+    end
+
+    speedLimitedVehicles = {}
+    hornMutedVehicles = {}
+    speechMutedDrivers = {}
+    globalHornMutedVehicles = {}
+    bypassTaskUntil = {}
+    bubbleStuckSince = {}
+    bypassSideLock = {}
+    bypassPlan = {}
 end
 
 local function isEmergencyVehicle(vehicle)
@@ -999,19 +1113,37 @@ CreateThread(function()
         local vehiclePool = GetGamePool('CVehicle') or {}
         local now = GetGameTimer()
         local suppressionSweepInterval = math.max(750, math.min(2000, (cfg.Advanced and cfg.Advanced.updateInterval) or 1000))
+        local enableNPCs = cfg.EnableNPCs ~= false
 
-        if (now - lastSuppressionSweepAt) >= suppressionSweepInterval then
-            enforceVehicleSuppression(cfg, vehiclePool, playerCoords)
-            lastSuppressionSweepAt = now
-        else
-            updatePlayerVehicleTracking()
-            applyStaticVehicleSuppression(vehSettings)
+        if lastEnableNPCsState == nil or lastEnableNPCsState ~= enableNPCs then
+            lastEnableNPCsState = enableNPCs
+            lastSuppressionSweepAt = 0
+            if enableNPCs then
+                masterDisableStateApplied = false
+            end
         end
 
-        applyWantedSettings(cfg)
+        if not enableNPCs then
+            if not masterDisableStateApplied then
+                resetTrafficControllerState()
+                resetStaticVehicleSuppression()
+                resetWantedSettings()
+                masterDisableStateApplied = true
+            end
+        else
+            masterDisableStateApplied = false
+            if (now - lastSuppressionSweepAt) >= suppressionSweepInterval then
+                enforceVehicleSuppression(cfg, vehiclePool, playerCoords)
+                lastSuppressionSweepAt = now
+            else
+                updatePlayerVehicleTracking()
+                applyStaticVehicleSuppression(vehSettings)
+            end
 
-        local emergencyCfg = vehSettings.emergencyVehicleBehavior
-        if emergencyCfg.enabled then
+            applyWantedSettings(cfg)
+
+            local emergencyCfg = vehSettings.emergencyVehicleBehavior
+            if emergencyCfg.enabled then
             local anchors = {}
             if emergencyCfg.stoppedEmergencyBubbleEnabled ~= false then
                 anchors = collectEmergencyAnchors(emergencyCfg, vehiclePool, playerCoords)
@@ -1038,6 +1170,10 @@ CreateThread(function()
             for i = 1, #nearbyVehicles do
                 local vehicle = nearbyVehicles[i]
                 if vehicle == 0 or not DoesEntityExist(vehicle) then
+                    resetVehicleEmergencyState(vehicle)
+                    goto continue_vehicle
+                end
+                if not isAmbientVehicleEntity(vehicle) then
                     resetVehicleEmergencyState(vehicle)
                     goto continue_vehicle
                 end
@@ -1196,6 +1332,7 @@ CreateThread(function()
                 ::continue_vehicle::
             end
         end
+        end
 
         local updateInterval = (cfg.Advanced and cfg.Advanced.updateInterval) or 1000
         Wait(math.max(100, math.min(250, updateInterval)))
@@ -1211,4 +1348,17 @@ AddEventHandler('cbk_ai:localWorldCleared', function()
     bubbleStuckSince = {}
     bypassSideLock = {}
     bypassPlan = {}
+end)
+
+AddEventHandler('onResourceStop', function(resourceName)
+    if resourceName ~= GetCurrentResourceName() then
+        return
+    end
+
+    resetTrafficControllerState()
+    resetStaticVehicleSuppression()
+    resetWantedSettings()
+    masterDisableStateApplied = false
+    lastEnableNPCsState = nil
+    lastSuppressionSweepAt = 0
 end)

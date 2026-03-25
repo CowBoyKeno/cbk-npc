@@ -13,6 +13,17 @@ local permissionState = {
     }
 }
 
+local function isTruthyConvar(name)
+    local value = string.lower(GetConvar(name, 'false'))
+    return value == 'true' or value == '1' or value == 'yes' or value == 'on'
+end
+
+local function isTelemetryLoggingEnabled()
+    return isTruthyConvar('cbk_npc_telemetry')
+        or isTruthyConvar('cbk_npc_debug')
+        or (type(Config) == 'table' and type(Config.Advanced) == 'table' and Config.Advanced.debug == true)
+end
+
 local function countTableNodes(value, depth, seen, maxDepth, maxNodes)
     if type(value) ~= 'table' then
         return 1
@@ -263,7 +274,9 @@ CreateThread(function()
     while true do
         Wait(Config.Security.telemetryIntervalMs or 300000)
         if CBKAI.Permissions.HasTelemetryEvents() then
-            print(('^3[CBK AI Security]^7 %s'):format(CBKAI.Permissions.FormatTelemetrySummary()))
+            if isTelemetryLoggingEnabled() then
+                print(('^3[CBK AI Security]^7 %s'):format(CBKAI.Permissions.FormatTelemetrySummary()))
+            end
             CBKAI.Permissions.ResetTelemetry()
         end
     end

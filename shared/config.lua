@@ -1,30 +1,41 @@
 Config = Config or {}
 
-local function deepCopy(value)
-    if type(value) ~= 'table' then
-        return value
+
+CBKAI = CBKAI or {}
+
+local function safeRequire(moduleName)
+    if type(moduleName) ~= 'string' or moduleName == '' then
+        return nil
     end
 
-    local copy = {}
-    for k, v in pairs(value) do
-        copy[k] = deepCopy(v)
+    local requireFn = require
+    if type(requireFn) ~= 'function' then
+        return nil
     end
-    return copy
+
+    local ok, result = pcall(requireFn, moduleName)
+    if ok and type(result) == 'table' then
+        return result
+    end
+
+    return nil
 end
 
-local function deepMerge(defaults, target)
-    for k, v in pairs(defaults) do
-        if type(v) == 'table' then
-            if type(target[k]) ~= 'table' then
-                target[k] = deepCopy(v)
-            else
-                deepMerge(v, target[k])
-            end
-        elseif target[k] == nil then
-            target[k] = v
-        end
+local function resolveUtils()
+    if type(CBKAI.Utils) == 'table' then
+        return CBKAI.Utils
     end
+    local loaded = safeRequire('utils') or safeRequire('shared.utils')
+    if type(loaded) == 'table' then
+        CBKAI.Utils = loaded
+        return loaded
+    end
+    error('cbk-npc: utils module unavailable')
 end
+
+local Utils = resolveUtils()
+local deepCopy = Utils.deepCopy
+local deepMerge = Utils.deepMerge or Utils.deepCopy
 
 CBKAI_LoadLegacyConfig = function()
     local resourceName = GetCurrentResourceName()
@@ -62,7 +73,7 @@ local defaults = {
     }
 }
 
-deepMerge(defaults, Config)
+Config = deepMerge(defaults, Config)
 
 CBKAI_Defaults = defaults
 CBKAI_DeepCopy = deepCopy

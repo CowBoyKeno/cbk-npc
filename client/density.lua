@@ -48,11 +48,12 @@ local scenarioTypeMap = {
         'WORLD_HUMAN_DRUG_DEALER',
     },
     crime = {
-        'WORLD_HUMAN_DRUG_DEALER',
         'WORLD_HUMAN_GUARD_PATROL',
         'WORLD_HUMAN_GUARD_STAND',
     },
 }
+
+CBKAI.ClientScenarioTypes = scenarioTypeMap
 
 local function setScenarioTypesEnabled(types, enabled)
     for i = 1, #types do
@@ -60,9 +61,39 @@ local function setScenarioTypesEnabled(types, enabled)
     end
 end
 
+local lastScenarioSuppressionKey = nil
+
+local function resetScenarioSuppression()
+    if lastScenarioSuppressionKey == nil then
+        return
+    end
+
+    for _, types in pairs(scenarioTypeMap) do
+        setScenarioTypesEnabled(types, true)
+    end
+
+    lastScenarioSuppressionKey = nil
+end
+
 local function applyScenarioSuppression(config)
     local settings = config.ScenarioSettings or {}
     local disableAll = settings.disableAllScenarios == true
+    local suppressionKey = table.concat({
+        tostring(disableAll),
+        tostring(settings.disableCops == true),
+        tostring(settings.disableParamedics == true),
+        tostring(settings.disableFiremen == true),
+        tostring(settings.disableVendors == true),
+        tostring(settings.disableBeggars == true),
+        tostring(settings.disableBuskers == true),
+        tostring(settings.disableHookers == true),
+        tostring(settings.disableDealer == true),
+        tostring(settings.disableCrimeScenarios == true),
+    }, '|')
+
+    if suppressionKey == lastScenarioSuppressionKey then
+        return
+    end
 
     setScenarioTypesEnabled(scenarioTypeMap.cops, not (disableAll or settings.disableCops))
     setScenarioTypesEnabled(scenarioTypeMap.paramedics, not (disableAll or settings.disableParamedics))
@@ -73,33 +104,90 @@ local function applyScenarioSuppression(config)
     setScenarioTypesEnabled(scenarioTypeMap.hookers, not (disableAll or settings.disableHookers))
     setScenarioTypesEnabled(scenarioTypeMap.dealer, not (disableAll or settings.disableDealer))
     setScenarioTypesEnabled(scenarioTypeMap.crime, not (disableAll or settings.disableCrimeScenarios))
+
+    lastScenarioSuppressionKey = suppressionKey
 end
 
-local function applyFinalHardSuppression(config)
+local function isExplicitDensityFactor(value)
+    return type(value) == 'number' and value >= 0.0 and value < 0.999
+end
+
+local function clampDensityFactor(value)
+    value = tonumber(value)
+    if value == nil then
+        return nil
+    end
+
+    return math.max(0.0, math.min(1.0, value))
+end
+
+local function isStandaloneAmbientControlEnabled(config)
+    config = config or {}
+    local advanced = config.Advanced or {}
+    return advanced.standaloneAmbientControl ~= false
+end
+
+local function getActiveTimeProfile(config)
+    local timeBased = config.TimeBasedSettings or {}
+    local hour = GetClockHours()
+    local daytime = hour >= 6 and hour < 18
+    return daytime and (timeBased.daySettings or {}) or (timeBased.nightSettings or {})
+end
+
+local function getEffectivePedDensityFactor(config)
+    if not isStandaloneAmbientControlEnabled(config) then
+        return 1.0
+    end
+
     local spawnControl = config.SpawnControl or {}
-    if spawnControl.enabled ~= true then
-        return
+    if spawnControl.enabled and spawnControl.disableAmbientPeds == true then
+        return 0.0
     end
 
-    local suppressPeds = spawnControl.disableAmbientPeds == true
-
-    if suppressPeds then
-        SetPedDensityMultiplierThisFrame(0.0)
+    local timeBased = config.TimeBasedSettings or {}
+    if timeBased.enabled then
+        return tonumber((getActiveTimeProfile(config) or {}).pedDensity) or 1.0
     end
 
-    if spawnControl.disableVehicleSpawn == true then
-        SetVehicleDensityMultiplierThisFrame(0.0)
-        SetRandomVehicleDensityMultiplierThisFrame(0.0)
+    local population = config.PopulationDensity or {}
+    if population.enabled then
+        return tonumber(population.pedDensity) or 1.0
     end
 
-    if spawnControl.disableParkedVehicles == true then
-        SetParkedVehicleDensityMultiplierThisFrame(0.0)
-    end
-
-    if spawnControl.disableScenarioPeds == true then
-        SetScenarioPedDensityMultiplierThisFrame(0.0, 0.0)
-    end
+    return 1.0
 end
+
+local function getEffectiveVehicleDensityFactor(config)
+    if not isStandaloneAmbientControlEnabled(config) then
+        return 1.0
+    end
+
+    local spawnControl = config.SpawnControl or {}
+    if spawnControl.enabled and spawnControl.disableVehicleSpawn == true then
+        return 0.0
+    end
+
+    local vehicleSettings = config.VehicleSettings or {}
+    if vehicleSettings.enableTraffic == false then
+        return 0.0
+    end
+
+    local timeBased = config.TimeBasedSettings or {}
+    if timeBased.enabled then
+        return tonumber((getActiveTimeProfile(config) or {}).vehicleDensity) or 1.0
+    end
+
+    local population = config.PopulationDensity or {}
+    if population.enabled then
+        return tonumber(population.vehicleDensity) or 1.0
+    end
+
+    return 1.0
+end
+
+CBKAI.ClientDensity = CBKAI.ClientDensity or {}
+CBKAI.ClientDensity.GetEffectivePedDensityFactor = getEffectivePedDensityFactor
+CBKAI.ClientDensity.GetEffectiveVehicleDensityFactor = getEffectiveVehicleDensityFactor
 
 local function applyDensity(config)
     config = config or {}
@@ -114,77 +202,82 @@ local function applyDensity(config)
         return
     end
 
-    if not config.EnableNPCs then
-        SetPedDensityMultiplierThisFrame(0.0)
-        SetScenarioPedDensityMultiplierThisFrame(0.0, 0.0)
-        SetVehicleDensityMultiplierThisFrame(0.0)
-        SetRandomVehicleDensityMultiplierThisFrame(0.0)
-        SetParkedVehicleDensityMultiplierThisFrame(0.0)
+    if not config.EnableNPCs or not isStandaloneAmbientControlEnabled(config) then
+        resetScenarioSuppression()
         return
     end
 
     local population = config.PopulationDensity or {}
+    local pedDensity = nil
+    local scenarioPedDensity = nil
+    local vehicleDensity = nil
+    local parkedVehicleDensity = nil
+
     if population.enabled then
-        SetPedDensityMultiplierThisFrame(population.pedDensity or 0.0)
-        SetScenarioPedDensityMultiplierThisFrame(population.scenarioPedDensity or 0.0, population.scenarioPedDensity or 0.0)
-        SetVehicleDensityMultiplierThisFrame(population.vehicleDensity or 0.0)
-        SetRandomVehicleDensityMultiplierThisFrame(population.vehicleDensity or 0.0)
-        SetParkedVehicleDensityMultiplierThisFrame(population.parkedVehicleDensity or 0.0)
-    end
-
-    local spawnControl = config.SpawnControl or {}
-    if spawnControl.enabled then
-        local suppressPeds = spawnControl.disableAmbientPeds == true
-
-        if suppressPeds then
-            SetPedDensityMultiplierThisFrame(0.0)
-        end
-
-        if spawnControl.disableVehicleSpawn then
-            SetVehicleDensityMultiplierThisFrame(0.0)
-            SetRandomVehicleDensityMultiplierThisFrame(0.0)
-        end
-
-        if spawnControl.disableParkedVehicles then
-            SetParkedVehicleDensityMultiplierThisFrame(0.0)
-        end
-
-        if spawnControl.disableScenarioPeds then
-            SetScenarioPedDensityMultiplierThisFrame(0.0, 0.0)
-        end
-    end
-
-    if config.ScenarioSettings and config.ScenarioSettings.disableAllScenarios then
-        SetScenarioPedDensityMultiplierThisFrame(0.0, 0.0)
+        pedDensity = clampDensityFactor(population.pedDensity)
+        scenarioPedDensity = clampDensityFactor(population.scenarioPedDensity)
+        vehicleDensity = clampDensityFactor(population.vehicleDensity)
+        parkedVehicleDensity = clampDensityFactor(population.parkedVehicleDensity)
     end
 
     local timeBased = config.TimeBasedSettings or {}
     if timeBased.enabled then
-        local hour = GetClockHours()
-        local daytime = hour >= 6 and hour < 18
-        local selected = daytime and (timeBased.daySettings or {}) or (timeBased.nightSettings or {})
+        local selected = getActiveTimeProfile(config)
+        pedDensity = clampDensityFactor(selected.pedDensity)
+        vehicleDensity = clampDensityFactor(selected.vehicleDensity)
 
-        SetPedDensityMultiplierThisFrame(selected.pedDensity or 0.0)
-        SetVehicleDensityMultiplierThisFrame(selected.vehicleDensity or 0.0)
-
-        if not selected.enableScenarios then
-            SetScenarioPedDensityMultiplierThisFrame(0.0, 0.0)
+        if selected.enableScenarios == false then
+            scenarioPedDensity = 0.0
         end
+    end
+
+    local spawnControl = config.SpawnControl or {}
+    if spawnControl.enabled then
+        if spawnControl.disableAmbientPeds == true then
+            pedDensity = 0.0
+        end
+
+        if spawnControl.disableVehicleSpawn == true then
+            vehicleDensity = 0.0
+        end
+
+        if spawnControl.disableParkedVehicles == true then
+            parkedVehicleDensity = 0.0
+        end
+
+        if spawnControl.disableScenarioPeds == true then
+            scenarioPedDensity = 0.0
+        end
+    end
+
+    if config.ScenarioSettings and config.ScenarioSettings.disableAllScenarios then
+        scenarioPedDensity = 0.0
     end
 
     if config.VehicleSettings then
         if config.VehicleSettings.enableTraffic == false then
-            SetVehicleDensityMultiplierThisFrame(0.0)
-            SetRandomVehicleDensityMultiplierThisFrame(0.0)
-            SetParkedVehicleDensityMultiplierThisFrame(0.0)
-        elseif config.VehicleSettings.trafficDensityOverridePopulation == true and type(config.VehicleSettings.trafficDensity) == 'number' then
-            SetVehicleDensityMultiplierThisFrame(config.VehicleSettings.trafficDensity)
-            SetRandomVehicleDensityMultiplierThisFrame(config.VehicleSettings.trafficDensity)
+            vehicleDensity = 0.0
         end
     end
 
+    if isExplicitDensityFactor(pedDensity) then
+        SetPedDensityMultiplierThisFrame(pedDensity)
+    end
+
+    if isExplicitDensityFactor(scenarioPedDensity) then
+        SetScenarioPedDensityMultiplierThisFrame(scenarioPedDensity, scenarioPedDensity)
+    end
+
+    if isExplicitDensityFactor(vehicleDensity) then
+        SetVehicleDensityMultiplierThisFrame(vehicleDensity)
+        SetRandomVehicleDensityMultiplierThisFrame(vehicleDensity)
+    end
+
+    if isExplicitDensityFactor(parkedVehicleDensity) then
+        SetParkedVehicleDensityMultiplierThisFrame(parkedVehicleDensity)
+    end
+
     applyScenarioSuppression(config)
-    applyFinalHardSuppression(config)
 end
 
 CreateThread(function()
@@ -192,4 +285,12 @@ CreateThread(function()
         Wait(0)
         applyDensity(CBKAI.ClientState.config)
     end
+end)
+
+AddEventHandler('onResourceStop', function(resourceName)
+    if resourceName ~= GetCurrentResourceName() then
+        return
+    end
+
+    resetScenarioSuppression()
 end)

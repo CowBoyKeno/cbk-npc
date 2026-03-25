@@ -1,5 +1,57 @@
 CBKAI = CBKAI or {}
 
+local function safeRequire(moduleName)
+    if type(moduleName) ~= 'string' or moduleName == '' then
+        return nil
+    end
+
+    local requireFn = require
+    if type(requireFn) ~= 'function' then
+        return nil
+    end
+
+    local ok, result = pcall(requireFn, moduleName)
+    if ok and type(result) == 'table' then
+        return result
+    end
+
+    return nil
+end
+
+local function resolveUtils()
+    if type(CBKAI.Utils) == 'table' then
+        return CBKAI.Utils
+    end
+    local loaded = safeRequire('utils') or safeRequire('shared.utils')
+    if type(loaded) == 'table' then
+        CBKAI.Utils = loaded
+        return loaded
+    end
+    error('cbk-npc: utils module unavailable')
+end
+
+local function resolveLog()
+    if type(CBKAI.Log) == 'table' then
+        return CBKAI.Log
+    end
+    local loaded = safeRequire('log') or safeRequire('shared.log')
+    if type(loaded) == 'table' then
+        CBKAI.Log = loaded
+        return loaded
+    end
+    local noop = function() end
+    return {
+        debug = noop,
+        info = noop,
+        warn = noop,
+        error = noop,
+        perfMarker = noop,
+    }
+end
+
+local Log = resolveLog()
+local Utils = resolveUtils()
+
 local runtimeReports = {}
 
 local TRAFFIC_CONTEXT_RADIUS = 150.0
@@ -20,17 +72,22 @@ end
 
 trafficContextTelemetry.windowStartedAt = nowMs()
 
+local clamp = Utils.clamp
+
+local function isTruthyConvar(name)
+    local value = string.lower(GetConvar(name, 'false'))
+    return value == 'true' or value == '1' or value == 'yes' or value == 'on'
+end
+
+local function isTelemetryLoggingEnabled()
+    return isTruthyConvar('cbk_npc_telemetry')
+        or isTruthyConvar('cbk_npc_debug')
+        or (type(Config) == 'table' and type(Config.Advanced) == 'table' and Config.Advanced.debug == true)
+end
+
 local function sanitizeMetric(value, maxValue)
     local numeric = math.floor(tonumber(value) or 0)
-    if numeric < 0 then
-        return 0
-    end
-
-    if numeric > maxValue then
-        return maxValue
-    end
-
-    return numeric
+    return clamp(numeric, 0, maxValue)
 end
 
 local function sanitizeVehicleNetIds(values, maxCount)
@@ -361,6 +418,7 @@ end)
 
 CreateThread(function()
     while true do
+        local t0 = GetGameTimer()
         local players = GetPlayers()
         local onFootSpatialIndex = buildOnFootSpatialIndex(players)
         local indexedOnFootPlayers = getIndexedPlayerCount(onFootSpatialIndex)
@@ -387,6 +445,9 @@ CreateThread(function()
 
         recordTrafficContextCycle(indexedOnFootPlayers, targetedPlayers, totalAnchors, maxAnchorsInPayload)
 
+        local t1 = GetGameTimer()
+        Log.perfMarker(('TrafficContextLoop: %d players, %d ms'), #players, t1 - t0)
+
         Wait(500)
     end
 end)
@@ -395,7 +456,7 @@ CreateThread(function()
     while true do
         Wait(Config.Security.telemetryIntervalMs or 300000)
         local snapshot = getTrafficContextTelemetrySnapshot(true)
-        if snapshot.cycles > 0 then
+        if snapshot.cycles > 0 and isTelemetryLoggingEnabled() then
             print(('^3[CBK AI Traffic]^7 cycles=%d windowMs=%d avgIndexedOnFoot=%.1f avgTargets=%.1f avgAnchorsPayload=%.2f avgAnchorsCycle=%.1f maxAnchorsPayload=%d'):format(
                 snapshot.cycles,
                 snapshot.elapsedMs,

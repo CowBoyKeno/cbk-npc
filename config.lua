@@ -13,9 +13,9 @@ Ambient-only resource.
 - Clients apply that policy to nearby ambient entities they can control.
 
 Traffic density precedence:
-- Default source of truth: Config.PopulationDensity.vehicleDensity
-- Override only when:
-  Config.VehicleSettings.trafficDensityOverridePopulation = true
+- Moving vehicle density comes from Config.PopulationDensity.vehicleDensity.
+- If time-based settings are enabled, the active day/night vehicleDensity overrides it.
+- Config.VehicleSettings.enableTraffic is the master on/off switch for moving traffic.
 
 Ped suppression precedence:
 - Use Config.SpawnControl.disableAmbientPeds to hard-suppress ambient peds.
@@ -37,7 +37,7 @@ Config.EnableNPCs = true                     -- Master runtime toggle. If false,
 Config.PopulationDensity = {
     enabled = true,                          -- Enables this density block. If false, density values below are ignored.
     pedDensity = 0.1,                        -- Ambient ped density multiplier (0.0 to 1.0).
-    vehicleDensity = 0.8,                    -- Ambient moving vehicle density multiplier (0.0 to 1.0).
+    vehicleDensity = 0.8,                    -- Ambient moving vehicle density multiplier (0.0 to 1.0) when traffic is enabled.
     parkedVehicleDensity = 0.1,              -- Parked vehicle density multiplier (0.0 to 1.0).
     scenarioPedDensity = 0.5,                -- Scenario ped density multiplier (0.0 to 1.0). Can be overridden by SpawnControl or TimeBasedSettings.
 }
@@ -49,7 +49,7 @@ Config.PopulationDensity = {
 Config.SpawnControl = {
     enabled = false,                         -- Master suppression block toggle. If false, all keys below are ignored.
     disableAmbientPeds = false,              -- Hard-suppress ambient peds. Can conflict with pedDensity > 0 because suppression wins.
-    disableVehicleSpawn = false,             -- Hard-suppress moving ambient vehicles. Overrides vehicleDensity and trafficDensity.
+    disableVehicleSpawn = false,             -- Hard-suppress moving ambient vehicles. Overrides moving vehicle density controls.
     disableParkedVehicles = false,           -- Hard-suppress parked ambient vehicles. Overrides parkedVehicleDensity.
     disableScenarioPeds = false,             -- Hard-suppress scenario peds. Overrides scenarioPedDensity and scenario enable toggles.
 }
@@ -119,9 +119,7 @@ Config.VehicleSettings = {
     disableHelicopters = true,               -- Suppress ambient helicopter generation.
     disableTrains = true,                    -- Suppress ambient train generation.
 
-    enableTraffic = true,                    -- Hard master toggle for ambient traffic. If false, traffic density settings are effectively overridden to zero.
-    trafficDensity = 0.8,                    -- Used only if trafficDensityOverridePopulation=true.
-    trafficDensityOverridePopulation = false, -- If true, trafficDensity overrides PopulationDensity.vehicleDensity.
+    enableTraffic = true,                    -- Master toggle for moving ambient traffic. PopulationDensity.vehicleDensity remains the density source.
     maxVehicles = 100,                       -- Local ambient vehicle cap near player.
 
     vehiclesRespectLights = true,            -- Traffic-controller compliance layer. Pair with NPCBehavior.respectTrafficLights for consistent behavior.
@@ -278,7 +276,7 @@ Config.Advanced = {
 
     suppressionLevel = 'medium',              -- none, low, medium, high, maximum
 
-    debug = false,                            -- Enables debug logging paths.
+    debug = false,                            -- Enables cbk-npc debug/perf logging paths.
     showNPCCount = false,                     -- Enables periodic nearby ambient count logging.
 }
 
@@ -317,6 +315,7 @@ Config.Events = {
 
 Config.Locale = {
     invalid_permission = 'You do not have permission to use this command', -- Message shown when command permission checks fail.
+    panel_locked = 'CBK Panel is currently locked by another admin.',      -- Message shown when a second admin tries to edit while lock is held.
 }
 
 -- =============================================================================
@@ -327,6 +326,11 @@ Config.Commands = {
     enabled = true,                           -- Master command registration toggle. If false, no commands below are registered.
     reloadCommand = 'npcreload',              -- Reloads config.lua and sync state.
     toggleCommand = 'npctoggle',              -- Toggles EnableNPCs runtime state.
+    panelCommand = 'cbknpc',                  -- Internal command id used for the panel key mapping.
+    panelKey = 'F7',                          -- Keyboard bind for opening the CBK Panel.
+    panelSaveCommand = 'cbkpanelsave',        -- Saves current runtime config profile for panel quick restore.
+    panelLoadCommand = 'cbkpanelload',        -- Loads runtime config profile from disk and syncs it.
+    panelUnlockCommand = 'cbkpanelunlock',    -- Releases panel lock if it gets stuck.
     countCommand = 'npccount',                -- Shows nearby ambient counts.
     trafficStatsCommand = 'npctrafficstats',  -- Shows traffic telemetry snapshot.
     trafficStatsResetCommand = 'npctrafficstatsreset', -- Resets telemetry window and reports prior window summary.
@@ -352,6 +356,8 @@ Config.Security = {
     rateLimitWindowMs = 5000,                 -- Shared rate-limit window for protected client events.
     requestInitMaxCalls = 12,                 -- Max init requests per player per rate-limit window.
     runtimeReportMaxCalls = 24,               -- Max runtime reports per player per rate-limit window.
+    panelSetMaxCalls = 60,                    -- Max live panel update events per player per rate-limit window.
+    panelAdminActionMaxCalls = 12,            -- Max panel admin actions (save/load/unlock) per player per rate-limit window.
     maxPayloadNodes = 2500,                   -- Max payload node count accepted by server safety checks.
     maxPayloadDepth = 12,                     -- Max payload depth accepted by server safety checks.
     commandCooldownMs = 1000,                 -- Per-player cooldown between protected command executions.

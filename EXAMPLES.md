@@ -194,5 +194,8 @@ Config.VehicleSettings = {
 ## Notes
 
 - `disableAmbientPeds` is the canonical ped-suppression key in the shipped config.
-- `trafficDensityOverridePopulation = true` switches vehicle density authority to `Config.VehicleSettings.trafficDensity`.
+- Moving traffic density comes from `Config.PopulationDensity.vehicleDensity`, or the active time-based vehicle density override.
 - `/npcclear` now broadcasts a full ambient-world purge, briefly suppresses repopulation while it runs, and preserves player-associated vehicles.
+- The runtime panel opens with `Config.Commands.panelKey`.
+- `Save Profile` / `Load Profile` target the `runtime` panel profile, while `Save As` / `Load Selected` use named profiles in `profiles/cbk_panel/`.
+- Ped AI live edits are now refreshed onto nearby ambient peds, but some GTA changes are still clearest on newly managed peds. `disableNPCWeapons` is the main example.
