@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CBK Panel</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="root" class="panel-root hidden">
+    <div class="bg-grid"></div>
+    <div class="panel-shell">
+      <header class="panel-header">
+        <div>
+          <div class="kicker">Runtime Editor</div>
+          <h1>CBK PANEL</h1>
+        </div>
+        <div class="header-right">
+          <button id="saveBtn" class="action-btn" type="button">Save Profile</button>
+          <button id="loadBtn" class="action-btn" type="button">Load Profile</button>
+          <button id="unlockBtn" class="action-btn" type="button">Release Lock</button>
+          <div id="lockOwner" class="lock-pill">lock: none</div>
+          <div id="revision" class="revision-pill">rev 0</div>
+          <button id="closeBtn" class="close-btn" type="button">Close</button>
+        </div>
+      </header>
+
+      <div class="panel-body">
+        <aside class="panel-sidebar">
+          <div class="sidebar-kicker">Browse</div>
+          <input id="searchInput" class="search-input" type="search" placeholder="Search settings" />
+          <nav id="sectionNav" class="section-nav"></nav>
+        </aside>
+
+        <main id="sections" class="sections"></main>
+      </div>
+
+      <footer class="panel-footer">
+        <div class="profile-row">
+          <input id="profileNameInput" class="profile-input" type="text" maxlength="40" placeholder="profile name" />
+          <select id="profileSelect" class="profile-select"></select>
+          <button id="saveNamedBtn" class="action-btn" type="button">Save As</button>
+          <button id="loadNamedBtn" class="action-btn" type="button">Load Selected</button>
+          <button id="cloneProfileBtn" class="action-btn" type="button">Clone</button>
+          <button id="deleteProfileBtn" class="action-btn danger" type="button">Delete Selected</button>
+        </div>
+        <div id="profileMeta" class="profile-meta hidden"></div>
+        <span>Live edits are server-validated and sync to all clients.</span>
+      </footer>
+    </div>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="panel.js"></script>
+</body>
+</html>
