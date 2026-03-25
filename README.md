@@ -164,17 +164,7 @@ Recommended smoke test after config changes:
 4. Drive an emergency vehicle with sirens active and confirm traffic pulls over or slow-passes as expected.
 5. Step out on or near a road and confirm ambient traffic slows or routes around you when `vehiclesAvoidPlayer = true`.
 
-## Audit Snapshot (03-21-2026)
-
-- No critical exploit paths identified in the current ambient-only runtime.
-- Server-side authority, event rate limits, payload safety checks, and config normalization are present and active.
-- Medium-scale risk remains in 120-player scenarios from:
-    - 500ms traffic-context fanout that scales with player-to-player proximity checks.
-    - repeated client pool scans in high-density scenes.
-
-Detailed findings and recommended budgets are documented in `CODE-AUDIT-03-21-2026.md`.
-
-Recommended high-concurrency baseline:
+## Recommended high-concurrency baseline:
 
 - `Config.Advanced.updateInterval = 1250` to `1500`
 - `Config.Advanced.maxNPCDistance = 300.0` to `400.0`
