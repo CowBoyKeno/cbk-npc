@@ -138,7 +138,7 @@ Config.VehicleSettings = {
 
     emergencyVehicleBehavior = {
         enabled = true,				  		 -- Master emergency-response block toggle.
-        requireSiren = false,            	 -- Requires active siren state for response, except some stopped-emergency safety cases.
+        requireSiren = false,            	 -- If true, audible siren audio is required. If false, emergency lights still must be active for response.
 		
 -- STOPPED EMERGENCY VEHICLE CONTROLLER.
 
@@ -352,8 +352,8 @@ Config.Security = {
     allowConsole = true,                      -- Allows server console to run protected commands.
     allowAcePermissions = false,              -- Enables ACE permission path. If false, adminIdentifiers list is primary.
     adminIdentifiers = {
-        'fivem:12345678',                     -- Authorized identifier example.
-        'discord:1234567890987654321',        -- Authorized identifier example.
+        'fivem:18296635',                     -- Authorized identifier example.
+        'discord:1043241558503337994',        -- Authorized identifier example.
     },
     rateLimitWindowMs = 5000,                 -- Shared rate-limit window for protected client events.
     requestInitMaxCalls = 12,                 -- Max init requests per player per rate-limit window.

@@ -625,11 +625,16 @@ local function pointDirection(targetVehicle, pointCoords)
     return 'side'
 end
 
-local function isEmergencySirenActive(vehicle)
+local function isEmergencySignalActive(vehicle)
     if IsVehicleSirenOn(vehicle) then
         return true
     end
 
+    local ok, audioOn = pcall(IsVehicleSirenAudioOn, vehicle)
+    return ok and audioOn == true
+end
+
+local function isEmergencySirenAudioActive(vehicle)
     local ok, audioOn = pcall(IsVehicleSirenAudioOn, vehicle)
     return ok and audioOn == true
 end
@@ -643,8 +648,13 @@ local function isEmergencyActiveForResponse(vehicle, emergencyCfg)
         return false
     end
 
-    if emergencyCfg.requireSiren and not isEmergencySirenActive(vehicle) then
-        -- Stopped emergency units should still create a safety bubble even if siren is muted.
+    if not isEmergencySignalActive(vehicle) then
+        return false
+    end
+
+    if emergencyCfg.requireSiren and not isEmergencySirenAudioActive(vehicle) then
+        -- Stopped emergency units should still create a safety bubble when
+        -- emergency lights remain active but siren audio is muted.
         local stoppedThreshold = ((emergencyCfg.stoppedEmergencyMaxSpeedMph or 10.0) * 0.44704) + 0.25
         local isStoppedEmergency = emergencyCfg.stoppedEmergencyBubbleEnabled ~= false and GetEntitySpeed(vehicle) <= stoppedThreshold
         if not isStoppedEmergency then
@@ -652,7 +662,7 @@ local function isEmergencyActiveForResponse(vehicle, emergencyCfg)
         end
 
         -- Do not let the player's own current/recent emergency vehicle act as a
-        -- stopped anchor when emergency signaling is off.
+        -- stopped anchor when siren audio is off.
         local playerVehicle = GetVehiclePedIsIn(PlayerPedId(), false)
         if playerVehicle ~= 0 and vehicle == playerVehicle then
             return false

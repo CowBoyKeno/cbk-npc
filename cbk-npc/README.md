@@ -107,7 +107,7 @@ Use this table during live tuning to avoid setting combinations that cancel each
 - Ambient ped audio, animation, and survivability: `disableAmbientSpeech`, `disableAmbientHorns`, `disablePainAudio`, `disableAmbientAnims`, `disableAmbientBaseAnims`, `disableGestureAnims`, `allowPlayerMelee`, `npcCanRagdoll`, `npcCanBeKnockedOffBike`, `canEvasiveDive`, `canCowerInCover`, `canBeTargetted`, `canBeTargettedByPlayer`, `canBeShotInVehicle`, `canBeDraggedOutOfVehicle`.
 - Ambient ped pathing: `canUseLadders`, `canUseClimbovers`, `canDropFromHeight`, `pathAvoidFire`.
 - Ambient driver control: `disableNPCDriving`, `npcDrivingStyle`, `respectTrafficLights`, `respectStopSigns`, `avoidTraffic`, `PopulationDensity.vehicleDensity`, `VehicleSettings.enableTraffic`, `VehicleSettings.maxVehicles`, `VehicleSettings.vehiclesRespectLights`, `VehicleSettings.vehiclesUseIndicators`, `VehicleSettings.enableVehicleDamage`, `VehicleSettings.vehiclesAvoidPlayer`.
-- Emergency traffic response: `VehicleSettings.emergencyVehicleBehavior.*`, including slow-pass, oncoming bypass, stopped-emergency bubbles, siren requirement, horn suppression, and speech suppression.
+- Emergency traffic response: `VehicleSettings.emergencyVehicleBehavior.*`, including slow-pass, oncoming bypass, stopped-emergency bubbles, emergency-signal requirement, optional siren-audio requirement, horn suppression, and speech suppression.
 - Ambient cleanup and world shaping: `Advanced.maxAmbientPeds`, `Advanced.autoCleanupEnabled`, `Advanced.cleanupDistance`, `Advanced.cleanupInterval`, `Advanced.deleteDeadNPCs`, `Advanced.cleanupDeadNPCsAfterMs`, `Advanced.deleteWreckedEmptyVehicles`, `Advanced.cleanupWreckedVehiclesAfterMs`, `Advanced.deleteAbandonedEmptyVehicles`, `Advanced.cleanupAbandonedVehiclesAfterMs`, `Advanced.abandonedVehicleSpeedThresholdMph`.
 - Clear-world extras: `Advanced.clearAmbientGarbageOnClear` extends `/npcclear` to include common loose trash and rubble props.
 
@@ -165,7 +165,7 @@ Recommended smoke test after config changes:
 1. Restart the resource and confirm there are no startup errors.
 2. Run `/npcstatus` and `/npcvalidate`.
 3. Toggle traffic density or scenario settings, then run `/npcreload`.
-4. Drive an emergency vehicle with sirens active and confirm traffic pulls over or slow-passes as expected.
+4. Drive an emergency vehicle with emergency lights active, and with siren audio active as well if `requireSiren = true`, and confirm traffic pulls over or slow-passes as expected.
 5. Step out on or near a road and confirm ambient traffic slows or routes around you when `vehiclesAvoidPlayer = true`.
 
 ## Audit Snapshot (03-21-2026)
