@@ -29,31 +29,18 @@ body {
 .panel-root {
   position: fixed;
   inset: 0;
-  display: grid;
-  place-items: center;
+  overflow: hidden;
 }
 
 .panel-root.hidden {
   display: none;
 }
 
-.bg-grid {
-  position: absolute;
-  inset: 0;
-  background:0;
-}
-
-.bg-grid::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background-image: linear-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px), linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
-  background-size: 26px 26px;
-  opacity: 0.4;
-}
-
 .panel-shell {
-  position: relative;
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
   width: min(1220px, 95vw);
   height: min(760px, 92vh);
   padding: 18px;
@@ -65,6 +52,14 @@ body {
   grid-template-rows: auto 1fr auto;
   gap: 12px;
   animation: rise-in 240ms ease-out;
+}
+
+.panel-shell.is-positioned {
+  transform: none;
+}
+
+.panel-shell.is-dragging {
+  cursor: grabbing;
 }
 
 .panel-body {
@@ -90,6 +85,16 @@ body {
   justify-content: space-between;
   align-items: center;
   gap: 10px;
+  cursor: grab;
+  -webkit-user-select: none;
+  user-select: none;
+  touch-action: none;
+}
+
+.panel-root.is-dragging,
+.panel-root.is-dragging * {
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 .kicker {
@@ -109,6 +114,12 @@ h1 {
   display: flex;
   align-items: center;
   gap: 10px;
+}
+
+.header-right button,
+.header-right input,
+.header-right select {
+  touch-action: auto;
 }
 
 .revision-pill {

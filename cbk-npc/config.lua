@@ -22,9 +22,9 @@ Ped suppression precedence:
 - Use Config.SpawnControl.disableVehicleSpawn to hard-suppress ambient vehicles.
 
 Apply changes with:
-- /npcreload
+- /npcreload for live runtime behavior changes
 or
-- restart cbk-npc
+- restart cbk-npc for command-name or panel-key changes
 ==============================================================================
 ]]
 
@@ -37,8 +37,8 @@ Config.EnableNPCs = true                     -- Master runtime toggle. If false,
 Config.PopulationDensity = {
     enabled = true,                          -- Enables this density block. If false, density values below are ignored.
     pedDensity = 0.1,                        -- Ambient ped density multiplier (0.0 to 1.0).
-    vehicleDensity = 0.8,                    -- Ambient moving vehicle density multiplier (0.0 to 1.0) when traffic is enabled.
-    parkedVehicleDensity = 0.1,              -- Parked vehicle density multiplier (0.0 to 1.0).
+    vehicleDensity = 0.8,                    -- Ambient moving vehicle density factor (0.0 to 1.0) when traffic is enabled. Also scales the local ambient-traffic trim cap.
+    parkedVehicleDensity = 0.1,              -- Parked vehicle density factor (0.0 to 1.0). Also scales the local parked ambient-vehicle trim cap.
     scenarioPedDensity = 0.5,                -- Scenario ped density multiplier (0.0 to 1.0). Can be overridden by SpawnControl or TimeBasedSettings.
 }
 
@@ -81,6 +81,7 @@ Config.NPCBehavior = {
     disableNPCDriving = false,               -- Stops ambient drivers from normal driving tasks.
     npcDrivingStyle = 'normal',              -- normal, careful, reckless, ignored
     respectTrafficLights = true,             -- Base driver profile respects lights. Works with VehicleSettings.vehiclesRespectLights.
+    respectStopSigns = true,                 -- Biases ambient drivers toward full stops at signed intersections. Works with VehicleSettings.vehiclesRespectLights.
     avoidTraffic = true,                     -- Lower aggression around road actors.
 
     disableAmbientSpeech = true,             -- Mutes ambient ped speech.
@@ -120,7 +121,7 @@ Config.VehicleSettings = {
     disableTrains = true,                    -- Suppress ambient train generation.
 
     enableTraffic = true,                    -- Master toggle for moving ambient traffic. PopulationDensity.vehicleDensity remains the density source.
-    maxVehicles = 100,                       -- Local ambient vehicle cap near player.
+    maxVehicles = 200,                       -- Local ambient vehicle cap near player.
 
     vehiclesRespectLights = true,            -- Traffic-controller compliance layer. Pair with NPCBehavior.respectTrafficLights for consistent behavior.
     vehiclesUseIndicators = true,            -- Enables indicator/light signal use by ambient drivers.
@@ -137,7 +138,7 @@ Config.VehicleSettings = {
 
     emergencyVehicleBehavior = {
         enabled = true,				  		 -- Master emergency-response block toggle.
-        requireSiren = true,            	 -- Requires active siren state for response, except some stopped-emergency safety cases.
+        requireSiren = false,            	 -- Requires active siren state for response, except some stopped-emergency safety cases.
 		
 -- STOPPED EMERGENCY VEHICLE CONTROLLER.
 
@@ -145,7 +146,7 @@ Config.VehicleSettings = {
         slowPassRadius = 100.0, 			 -- Radius where slow-pass speed enforcement starts.
         slowPassSpeed = 10.0, 				 -- Target slow-pass speed.
         safeOncomingBypassEnabled = true, 	 -- Enables bypass planning around blocked emergency lane sections.
-        safeBypassLookAhead = 5.8, 			 -- Forward look-ahead distance used for bypass path planning.
+        safeBypassLookAhead = 16, 			 -- Forward look-ahead distance used for bypass path planning.
         safeBypassLateralOffset = 8.0, 		 -- Side offset used for bypass lane selection.
         safeBypassClearanceRadius = 5.0, 	 -- Clearance bubble for bypass corridor checks.
         safeBypassSpeedMph = 10.0, 			 -- Bypass execution speed.
@@ -262,10 +263,11 @@ Config.Advanced = {
     maxNPCDistance = 500.0,                   -- Max range for ambient behavior processing around player.
     standaloneAmbientControl = true,          -- Keeps ambient-only mode active. Set false only if another system is taking control.
 
-    maxAmbientPeds = 25,                      -- On-foot ambient ped cap inside maxNPCDistance
+    maxAmbientPeds = 50,                      -- On-foot ambient ped cap inside maxNPCDistance
     autoCleanupEnabled = true,                -- Enables distance-based cleanup routines.
     cleanupDistance = 600.0,                  -- Entities beyond this distance are cleanup candidates when autoCleanupEnabled=true.
     cleanupInterval = 60000,                  -- Cleanup sweep interval (ms).
+    clearAmbientGarbageOnClear = false,       -- If true, /npcclear also removes common loose trash and rubble props during the world purge.
     deleteDeadNPCs = true,                    -- Enables dead ped cleanup.
     cleanupDeadNPCsAfterMs = 15000,           -- Delay before deleting dead NPCs.
     deleteWreckedEmptyVehicles = true,        -- Enables cleanup of wrecked empty vehicles.
@@ -334,7 +336,7 @@ Config.Commands = {
     countCommand = 'npccount',                -- Shows nearby ambient counts.
     trafficStatsCommand = 'npctrafficstats',  -- Shows traffic telemetry snapshot.
     trafficStatsResetCommand = 'npctrafficstatsreset', -- Resets telemetry window and reports prior window summary.
-    clearCommand = 'npcclear',                -- Clears ambient world entities with player-vehicle protection.
+    clearCommand = 'npcclear',                -- Clears ambient world entities with player-vehicle protection. Honors Advanced.clearAmbientGarbageOnClear.
     validateCommand = 'npcvalidate',          -- Validates normalization differences in runtime config.
     statusCommand = 'npcstatus',              -- Shows revision and runtime status.
 
@@ -358,6 +360,7 @@ Config.Security = {
     runtimeReportMaxCalls = 24,               -- Max runtime reports per player per rate-limit window.
     panelSetMaxCalls = 60,                    -- Max live panel update events per player per rate-limit window.
     panelAdminActionMaxCalls = 12,            -- Max panel admin actions (save/load/unlock) per player per rate-limit window.
+    panelLockTimeoutMs = 300000,              -- Auto-releases stale panel locks after this many ms. Set 0 to disable timeout.
     maxPayloadNodes = 2500,                   -- Max payload node count accepted by server safety checks.
     maxPayloadDepth = 12,                     -- Max payload depth accepted by server safety checks.
     commandCooldownMs = 1000,                 -- Per-player cooldown between protected command executions.

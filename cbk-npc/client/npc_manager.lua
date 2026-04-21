@@ -78,11 +78,59 @@ local animalModelGroups = {
     },
 }
 
+local ambientGarbageModelNames = {
+    'prop_binbag_01',
+    'prop_binbag_03',
+    'prop_binbag_04',
+    'prop_cs_rub_binbag_01',
+    'prop_rub_binbag_01',
+    'prop_rub_binbag_03',
+    'prop_rub_binbag_04',
+    'p_cs_rubbish_01',
+    'p_cs_rubbish_02',
+    'p_cs_rubbish_03',
+    'prop_ld_rubble_01',
+    'prop_ld_rubble_02',
+    'prop_ld_rubble_03',
+    'prop_rub_boxpile_04',
+    'prop_rub_boxpile_05',
+    'prop_rub_boxpile_06',
+    'prop_rub_boxpile_07',
+    'prop_rub_pile_01',
+    'prop_rub_pile_02',
+    'prop_rub_pile_03',
+    'prop_rub_pile_04',
+    'prop_rub_pile_05',
+    'prop_rub_pile_06',
+    'prop_rub_pile_07',
+    'prop_rub_pile_08',
+    'prop_rub_pile_09',
+    'prop_rub_pile_10',
+}
+
+local ambientGarbageArchetypeMarkers = {
+    'binbag',
+    'rubbish',
+    'rub_boxpile',
+    'rub_pile',
+    'ld_rubble',
+}
+
+local ambientGarbageModelHashes = {}
+for i = 1, #ambientGarbageModelNames do
+    ambientGarbageModelHashes[GetHashKey(ambientGarbageModelNames[i])] = true
+end
+
 local relationshipGroups = {
     'PLAYER',
     'COP',
     'CIVMALE',
     'CIVFEMALE',
+    'PRIVATE_SECURITY',
+    'SECURITY_GUARD',
+    'MEDIC',
+    'FIREMAN',
+    'DEALER',
     'GANG_1',
     'GANG_2',
     'GANG_9',
@@ -97,6 +145,11 @@ local npcRelationshipGroups = {
     'COP',
     'CIVMALE',
     'CIVFEMALE',
+    'PRIVATE_SECURITY',
+    'SECURITY_GUARD',
+    'MEDIC',
+    'FIREMAN',
+    'DEALER',
     'GANG_1',
     'GANG_2',
     'GANG_9',
@@ -137,6 +190,86 @@ local PED_CONFIG_FLAGS = {
     disableShockingEvents = 294,
     dontActivateRagdollFromPlayerPedImpact = 306,
 }
+
+local DRIVING_STYLE_FLAGS = {
+    stopForVehicles = 1,
+    stopForPeds = 2,
+    swerveAroundAllVehicles = 4,
+    steerAroundStationaryVehicles = 8,
+    steerAroundPeds = 16,
+    steerAroundObjects = 32,
+    stopAtTrafficLights = 128,
+    goOffRoadWhenAvoiding = 256,
+    useWanderFallbackInsteadOfStraightLine = 2048,
+    avoidRestrictedAreas = 4096,
+    adjustCruiseSpeedBasedOnRoadSpeed = 16384,
+    useShortCutLinks = 262144,
+    changeLanesAroundObstructions = 524288,
+    useSwitchedOffNodes = 2097152,
+    preferNavmeshRoute = 4194304,
+    useStringPullingAtJunctions = 33554432,
+}
+
+local function addDrivingStyleFlag(flags, seen, flag)
+    if seen[flag] then
+        return
+    end
+
+    seen[flag] = true
+    flags[#flags + 1] = flag
+end
+
+local function buildDrivingStyleValue(flags)
+    local value = 0
+    for i = 1, #flags do
+        value = value + flags[i]
+    end
+    return value
+end
+
+local function getAmbientDrivingStyle(settings, vehicleSettings)
+    local style = settings.npcDrivingStyle or 'normal'
+    local flags = {}
+    local seen = {}
+    local controlledIntersectionCompliance = vehicleSettings.vehiclesRespectLights ~= false
+        and (settings.respectTrafficLights ~= false or settings.respectStopSigns == true)
+
+    addDrivingStyleFlag(flags, seen, DRIVING_STYLE_FLAGS.steerAroundStationaryVehicles)
+    addDrivingStyleFlag(flags, seen, DRIVING_STYLE_FLAGS.steerAroundPeds)
+    addDrivingStyleFlag(flags, seen, DRIVING_STYLE_FLAGS.steerAroundObjects)
+    addDrivingStyleFlag(flags, seen, DRIVING_STYLE_FLAGS.avoidRestrictedAreas)
+    addDrivingStyleFlag(flags, seen, DRIVING_STYLE_FLAGS.adjustCruiseSpeedBasedOnRoadSpeed)
+    addDrivingStyleFlag(flags, seen, DRIVING_STYLE_FLAGS.useShortCutLinks)
+    addDrivingStyleFlag(flags, seen, DRIVING_STYLE_FLAGS.changeLanesAroundObstructions)
+
+    if settings.avoidTraffic ~= false then
+        addDrivingStyleFlag(flags, seen, DRIVING_STYLE_FLAGS.stopForVehicles)
+        addDrivingStyleFlag(flags, seen, DRIVING_STYLE_FLAGS.stopForPeds)
+        addDrivingStyleFlag(flags, seen, DRIVING_STYLE_FLAGS.swerveAroundAllVehicles)
+    elseif style ~= 'reckless' and style ~= 'ignored' then
+        addDrivingStyleFlag(flags, seen, DRIVING_STYLE_FLAGS.stopForVehicles)
+        addDrivingStyleFlag(flags, seen, DRIVING_STYLE_FLAGS.stopForPeds)
+    end
+
+    if style == 'careful' then
+        addDrivingStyleFlag(flags, seen, DRIVING_STYLE_FLAGS.goOffRoadWhenAvoiding)
+        addDrivingStyleFlag(flags, seen, DRIVING_STYLE_FLAGS.useSwitchedOffNodes)
+        addDrivingStyleFlag(flags, seen, DRIVING_STYLE_FLAGS.preferNavmeshRoute)
+        addDrivingStyleFlag(flags, seen, DRIVING_STYLE_FLAGS.useStringPullingAtJunctions)
+    elseif style == 'ignored' then
+        addDrivingStyleFlag(flags, seen, DRIVING_STYLE_FLAGS.useWanderFallbackInsteadOfStraightLine)
+    end
+
+    if controlledIntersectionCompliance then
+        addDrivingStyleFlag(flags, seen, DRIVING_STYLE_FLAGS.stopAtTrafficLights)
+    end
+
+    if settings.respectStopSigns == true and vehicleSettings.vehiclesRespectLights ~= false then
+        addDrivingStyleFlag(flags, seen, DRIVING_STYLE_FLAGS.useStringPullingAtJunctions)
+    end
+
+    return buildDrivingStyleValue(flags)
+end
 
 local function normalizeModelHash(model)
     if type(model) == 'number' then
@@ -217,6 +350,46 @@ end
 
 local function isAmbientVehicle(vehicle)
     return isAmbientEntity(vehicle)
+end
+
+local function getEntityArchetypeNameSafe(entity)
+    if type(GetEntityArchetypeName) ~= 'function' then
+        return nil
+    end
+
+    local ok, archetypeName = pcall(GetEntityArchetypeName, entity)
+    if not ok or type(archetypeName) ~= 'string' or archetypeName == '' then
+        return nil
+    end
+
+    return string.lower(archetypeName)
+end
+
+local function isAmbientGarbageObject(object)
+    if object == 0 or not DoesEntityExist(object) or GetEntityType(object) ~= 3 then
+        return false
+    end
+
+    if IsEntityAttached(object) or not isAmbientEntity(object) then
+        return false
+    end
+
+    if ambientGarbageModelHashes[GetEntityModel(object)] == true then
+        return true
+    end
+
+    local archetypeName = getEntityArchetypeNameSafe(object)
+    if type(archetypeName) ~= 'string' then
+        return false
+    end
+
+    for i = 1, #ambientGarbageArchetypeMarkers do
+        if string.find(archetypeName, ambientGarbageArchetypeMarkers[i], 1, true) then
+            return true
+        end
+    end
+
+    return false
 end
 
 local function isStandaloneAmbientControlEnabled(config)
@@ -476,6 +649,55 @@ local function setDeadBodyShockEventsBlocked(ped, toggle)
     pcall(_BLOCK_PED_DEAD_BODY_SHOCKING_EVENTS, ped, toggle)
 end
 
+local function removeAllPedWeaponsSafe(ped, includeAmmo)
+    if type(RemoveAllPedWeapons) ~= 'function' then
+        return
+    end
+
+    pcall(RemoveAllPedWeapons, ped, includeAmmo == true)
+end
+
+local function clearPedTasksSafe(ped)
+    if type(ClearPedTasks) ~= 'function' then
+        return
+    end
+
+    pcall(ClearPedTasks, ped)
+end
+
+local function isPedInCombatSafe(ped, target)
+    if type(IsPedInCombat) ~= 'function' then
+        return false
+    end
+
+    local ok, inCombat = pcall(IsPedInCombat, ped, target or 0)
+    return ok and inCombat == true
+end
+
+local function clearPedSecondaryTaskSafe(ped)
+    if type(ClearPedSecondaryTask) ~= 'function' then
+        return
+    end
+
+    pcall(ClearPedSecondaryTask, ped)
+end
+
+local function stopCurrentPlayingAmbientSpeechSafe(ped)
+    if type(StopCurrentPlayingAmbientSpeech) ~= 'function' then
+        return
+    end
+
+    pcall(StopCurrentPlayingAmbientSpeech, ped)
+end
+
+local function setPedHighlyPerceptiveSafe(ped, enabled)
+    if type(SetPedHighlyPerceptive) ~= 'function' then
+        return
+    end
+
+    pcall(SetPedHighlyPerceptive, ped, enabled == true)
+end
+
 local function isVehiclePlayerOccupied(vehicle)
     if vehicle == 0 or not DoesEntityExist(vehicle) then
         return false
@@ -568,15 +790,42 @@ local function applyRelationshipSettings(config)
     relationshipOverridesApplied = true
 end
 
-local function applyPedReactionSettings(ped, settings)
-    local soundReactionEnabled = settings.ignorePlayer ~= true and (
-        settings.panicFromGunfire ~= false
+local function areAmbientSoundReactionsEnabled(settings)
+    return settings.panicFromGunfire ~= false
         or settings.reactToExplosions ~= false
         or settings.reactToFire ~= false
         or settings.reactToSirens ~= false
-    )
-    local deadBodyReactionEnabled = settings.ignorePlayer ~= true and settings.reactToDeadBodies ~= false
-    local disableAllShockingEvents = settings.ignorePlayer == true or (not soundReactionEnabled and not deadBodyReactionEnabled)
+end
+
+local function shouldBlockPedNonTemporaryEvents(settings)
+    local suppressPlayerInteraction = settings.ignorePlayer == true
+        or settings.canBeTargetted == false
+        or settings.canBeTargettedByPlayer == false
+        or settings.allowPlayerMelee == false
+
+    local suppressShockingEvents = settings.fleeFromPlayer ~= true
+        and settings.panicFromGunfire == false
+        and settings.reactToExplosions == false
+        and settings.reactToFire == false
+        and settings.reactToDeadBodies == false
+        and settings.reactToSirens == false
+
+    return suppressPlayerInteraction or suppressShockingEvents
+end
+
+local function applyPedPerceptionSettings(ped, seeingRange, hearingRange, alertness)
+    SetPedSeeingRange(ped, seeingRange)
+    SetPedHearingRange(ped, hearingRange)
+    SetPedAlertness(ped, alertness)
+
+    local highPerception = alertness >= 2 or seeingRange >= 175.0 or hearingRange >= 175.0
+    setPedHighlyPerceptiveSafe(ped, highPerception)
+end
+
+local function applyPedReactionSettings(ped, settings)
+    local soundReactionEnabled = areAmbientSoundReactionsEnabled(settings)
+    local deadBodyReactionEnabled = settings.reactToDeadBodies ~= false
+    local disableAllShockingEvents = not soundReactionEnabled and not deadBodyReactionEnabled
 
     SetPedCombatAttributes(ped, 9, deadBodyReactionEnabled)
     SetPedCombatAttributes(ped, 14, soundReactionEnabled)
@@ -877,7 +1126,17 @@ local function pruneEntityTracker(tracker)
     end
 end
 
-local function clearAmbientWorld()
+local function clearAmbientGarbageObjects()
+    local objects = GetGamePool('CObject') or {}
+    for i = 1, #objects do
+        local object = objects[i]
+        if isAmbientGarbageObject(object) then
+            deleteEntitySafely(object)
+        end
+    end
+end
+
+local function clearAmbientWorld(clearAmbientGarbage)
     local config = CBKAI.ClientState.config or Config
     updateProtectedPlayerVehicleState(config, PlayerPedId())
     local playerVehicle = GetVehiclePedIsIn(PlayerPedId(), false)
@@ -915,6 +1174,10 @@ local function clearAmbientWorld()
         end
     end
 
+    if clearAmbientGarbage == true then
+        clearAmbientGarbageObjects()
+    end
+
     CBKAI.RuntimeState.seenNearbyPeds = {}
     CBKAI.RuntimeState.deadPedSeenAt = {}
     CBKAI.RuntimeState.wreckedVehicleSeenAt = {}
@@ -931,33 +1194,53 @@ local function applyPedBehaviorToEntity(ped, playerPed, settings, accuracy, shoo
     local playerCoords = GetEntityCoords(playerPed)
     local pedCoords = GetEntityCoords(ped)
     local distance = #(pedCoords - playerCoords)
-    local blockNonTemporaryEvents = settings.ignorePlayer == true
+    local blockNonTemporaryEvents = shouldBlockPedNonTemporaryEvents(settings)
 
-    local seeingRange = settings.ignorePlayer == true and 0.0 or (settings.pedSeeingRange or 100.0)
-    local hearingRange = settings.ignorePlayer == true and 0.0 or (settings.pedHearingRange or 100.0)
+    local seeingRange = settings.pedSeeingRange or 100.0
+    local hearingRange = settings.pedHearingRange or 100.0
 
-    local alertness = settings.ignorePlayer == true and 0 or (settings.pedAlertness or 1)
+    local alertness = settings.pedAlertness or 1
 
     if settings.fleeFromPlayer and not IsPedInAnyVehicle(ped, false) then
+        if isPedInCombatSafe(ped, playerPed) then
+            clearPedTasksSafe(ped)
+        end
+
         if not IsPedFleeing(ped) then
             TaskSmartFleePed(ped, playerPed, 80.0, -1, false, false)
         end
     end
 
-    SetPedSeeingRange(ped, seeingRange)
-    SetPedHearingRange(ped, hearingRange)
-    SetPedAlertness(ped, alertness)
+    applyPedPerceptionSettings(ped, seeingRange, hearingRange, alertness)
 
     if settings.disableNPCWeapons then
+        removeAllPedWeaponsSafe(ped, true)
+        SetPedCanSwitchWeapon(ped, false)
         SetCurrentPedWeapon(ped, GetHashKey('WEAPON_UNARMED'), true)
         SetPedDropsWeaponsWhenDead(ped, false)
+    else
+        SetPedCanSwitchWeapon(ped, true)
+        SetPedDropsWeaponsWhenDead(ped, true)
     end
 
     StopPedSpeaking(ped, settings.disableAmbientSpeech == true)
+    if settings.disableAmbientSpeech == true then
+        stopCurrentPlayingAmbientSpeechSafe(ped)
+    end
+
     DisablePedPainAudio(ped, settings.disablePainAudio == true)
     SetPedCanPlayAmbientAnims(ped, settings.disableAmbientAnims ~= true)
     SetPedCanPlayAmbientBaseAnims(ped, settings.disableAmbientBaseAnims ~= true)
     SetPedCanPlayGestureAnims(ped, settings.disableGestureAnims ~= true)
+
+    if not IsPedInAnyVehicle(ped, false)
+        and (settings.disableAmbientAnims == true
+            or settings.disableAmbientBaseAnims == true
+            or settings.disableGestureAnims == true)
+    then
+        clearPedSecondaryTaskSafe(ped)
+    end
+
     SetBlockingOfNonTemporaryEvents(ped, blockNonTemporaryEvents)
     applyPedReactionSettings(ped, settings)
     applyPedFlagSettings(ped, settings)
@@ -968,6 +1251,10 @@ local function applyPedBehaviorToEntity(ped, playerPed, settings, accuracy, shoo
     SetPedShootRate(ped, shootRate)
 
     if settings.disableNPCCombat then
+        if not IsPedInAnyVehicle(ped, false) and isPedInCombatSafe(ped, playerPed) then
+            clearPedTasksSafe(ped)
+        end
+
         SetPedCombatAbility(ped, 0)
         SetPedCombatMovement(ped, 0)
         SetPedCanSwitchWeapon(ped, false)
@@ -1011,6 +1298,7 @@ local function applyVehicleBehaviorToDriver(driver, vehicle, settings, vehicleSe
     local style = settings.npcDrivingStyle or 'normal'
     local driverAbility = 0.75
     local driverAggressiveness = settings.avoidTraffic == false and 0.75 or 0.25
+    local drivingStyle = getAmbientDrivingStyle(settings, vehicleSettings)
 
     if style == 'careful' then
         driverAbility = 1.0
@@ -1036,8 +1324,14 @@ local function applyVehicleBehaviorToDriver(driver, vehicle, settings, vehicleSe
         end
     end
 
+    if vehicleSettings.vehiclesRespectLights ~= false and settings.respectStopSigns == true then
+        driverAbility = math.max(driverAbility, 0.95)
+        driverAggressiveness = math.min(driverAggressiveness, 0.10)
+    end
+
     SetDriverAbility(driver, driverAbility)
     SetDriverAggressiveness(driver, driverAggressiveness)
+    SetDriveTaskDrivingStyle(driver, drivingStyle)
 
     if vehicleSettings.vehiclesUseIndicators == false then
         SetVehicleIndicatorLights(vehicle, 0, false)
@@ -1175,9 +1469,7 @@ local function resetAmbientNpcRuntimeState(playerPed, playerCoords, maxDistance)
                 SetPedCanPlayAmbientBaseAnims(ped, true)
                 SetPedCanPlayGestureAnims(ped, true)
                 SetBlockingOfNonTemporaryEvents(ped, false)
-                SetPedSeeingRange(ped, 100.0)
-                SetPedHearingRange(ped, 100.0)
-                SetPedAlertness(ped, 1)
+                applyPedPerceptionSettings(ped, 100.0, 100.0, 1)
                 SetPedCanEvasiveDive(ped, true)
                 SetPedCanCowerInCover(ped, true)
                 SetPedCanBeTargetted(ped, true)
@@ -1189,6 +1481,7 @@ local function resetAmbientNpcRuntimeState(playerPed, playerCoords, maxDistance)
                 SetPedPathCanDropFromHeight(ped, true)
                 SetPedPathAvoidFire(ped, true)
                 SetPedMoveRateOverride(ped, 1.0)
+                SetPedDropsWeaponsWhenDead(ped, true)
                 SetPedCanSwitchWeapon(ped, true)
                 SetPedCombatAbility(ped, 1)
                 SetPedCombatMovement(ped, 1)
@@ -1200,9 +1493,10 @@ local function resetAmbientNpcRuntimeState(playerPed, playerCoords, maxDistance)
                 SetPedCanRagdollFromPlayerImpact(ped, true)
                 SetPedCanBeKnockedOffVehicle(ped, 0)
                 resetPedReactionAndFlagSettings(ped)
+                clearPedSecondaryTaskSafe(ped)
 
-                if IsPedFleeing(ped) then
-                    ClearPedTasks(ped)
+                if not IsPedInAnyVehicle(ped, false) and (IsPedFleeing(ped) or isPedInCombatSafe(ped, playerPed)) then
+                    clearPedTasksSafe(ped)
                 end
             end
         end
@@ -1293,12 +1587,13 @@ local function applyAmbientNpcBehavior()
         return
     end
 
-    if clearWorldUntil ~= 0 and clearWorldUntil <= GetGameTimer() and CBKAI.ClientState.clearWorldProtectedVehicleNetIds ~= nil then
+    if clearWorldUntil ~= 0 and clearWorldUntil <= GetGameTimer() then
         CBKAI.ClientState.clearWorldProtectedVehicleNetIds = nil
+        CBKAI.ClientState.clearWorldGarbageEnabled = nil
     end
 
     if clearWorldUntil > GetGameTimer() then
-        clearAmbientWorld()
+        clearAmbientWorld(CBKAI.ClientState.clearWorldGarbageEnabled == true)
         return
     end
 
@@ -1374,13 +1669,16 @@ end
 
 RegisterNetEvent('cbk_ai:cl:clearWorld', function(payload)
     local protectedVehicleNetIds = {}
+    local clearAmbientGarbage = false
     if type(payload) == 'table' then
         protectedVehicleNetIds = payload.protectedVehicleNetIds
+        clearAmbientGarbage = payload.clearAmbientGarbage == true
     end
 
     CBKAI.ClientState.clearWorldProtectedVehicleNetIds = buildProtectedVehicleLookup(protectedVehicleNetIds)
+    CBKAI.ClientState.clearWorldGarbageEnabled = clearAmbientGarbage
     CBKAI.ClientState.clearWorldUntil = GetGameTimer() + 5000
-    clearAmbientWorld()
+    clearAmbientWorld(clearAmbientGarbage)
     TriggerEvent('cbk_ai:localWorldCleared')
 end)
 
@@ -1450,7 +1748,17 @@ local function shouldRunImmediateAmbientPass(payload)
         local op = payload.ops[i]
         if type(op) == 'table' and type(op.path) == 'table' then
             local rootKey = op.path[1]
-            if rootKey == 'ScenarioSettings' or rootKey == 'SpawnControl' or rootKey == 'TimeBasedSettings' then
+            if rootKey == 'EnableNPCs'
+                or rootKey == 'NPCBehavior'
+                or rootKey == 'Relationships'
+                or rootKey == 'ScenarioSettings'
+                or rootKey == 'SpawnControl'
+                or rootKey == 'TimeBasedSettings'
+            then
+                return true
+            end
+
+            if rootKey == 'Advanced' and op.path[2] == 'standaloneAmbientControl' then
                 return true
             end
         end

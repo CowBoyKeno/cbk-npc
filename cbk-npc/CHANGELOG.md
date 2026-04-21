@@ -4,7 +4,7 @@ All notable changes to cbk-npc will be documented in this file.
 
 Note: entries below include pre-refactor history. The current shipped runtime is documented in `README.md` and is ambient-only, without framework bridges, job behavior, or managed spawning.
 
-## [Unreleased] - 03-22-2026
+## [6.0.0] - 2026-04-20
 
 ### Changed
 - **Resource renamed to cbk-npc** — `name` in `fxmanifest.lua` updated from `CBK_AI_Controller` to `cbk-npc`. Folder rename is pending.
@@ -23,10 +23,6 @@ Note: entries below include pre-refactor history. The current shipped runtime is
 
 ### Documentation
 - Updated README.md, INSTALLATION.md, EXAMPLES.md, CHANGELOG.md, and CODE-AUDIT to reflect `cbk-npc` naming and remove dead config key references.
-
----
-
-## [Unreleased] - 03-13-2026
 
 ### Documentation
 - Added `CODE-AUDIT-03-21-2026.md` with full runtime audit findings, 120-player performance modeling notes, and architectural decision comparison.

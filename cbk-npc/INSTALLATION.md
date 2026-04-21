@@ -1,5 +1,7 @@
 # Installation Guide
 
+Version 6.0.0
+
 ## Quick Start
 
 1. Place `cbk-npc` in your FiveM server `resources` folder.
@@ -159,7 +161,7 @@ To verify the emergency-response layer:
 
 ### Ped AI changes seem inconsistent
 
-- Live edits to `NPCBehavior.*` and `Relationships.*` now force a nearby ambient ped refresh, but some changes are still most visible on newly managed ambient peds.
+- Live edits to `NPCBehavior.*` and `Relationships.*` now force a nearby ambient ped refresh plus an immediate ambient re-apply pass, but some changes are still most visible on newly managed ambient peds.
 - `disableNPCWeapons` is the clearest example because GTA does not automatically re-arm the same already-disarmed ambient ped later.
 - Relationship changes now target player and non-player groups separately; if a relationship edit still looks wrong, retest away from scripted or mission entities because `cbk-npc` only manages ambient peds.
 

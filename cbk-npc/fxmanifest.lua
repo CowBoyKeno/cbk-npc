@@ -7,7 +7,7 @@ ui_page 'ui/index.html'
 author 'CowBoyKeno'
 name 'cbk-npc'
 description 'Ambient-only AI/NPC controller for FiveM servers with server-owned config and traffic policy'
-version '1.3.0'
+version '6.0.0'
 
 shared_scripts {
     'config.lua',

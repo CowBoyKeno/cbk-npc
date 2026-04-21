@@ -185,9 +185,28 @@ local function getEffectiveVehicleDensityFactor(config)
     return 1.0
 end
 
+local function getEffectiveParkedVehicleDensityFactor(config)
+    if not isStandaloneAmbientControlEnabled(config) then
+        return 1.0
+    end
+
+    local spawnControl = config.SpawnControl or {}
+    if spawnControl.enabled and spawnControl.disableParkedVehicles == true then
+        return 0.0
+    end
+
+    local population = config.PopulationDensity or {}
+    if population.enabled then
+        return tonumber(population.parkedVehicleDensity) or 1.0
+    end
+
+    return 1.0
+end
+
 CBKAI.ClientDensity = CBKAI.ClientDensity or {}
 CBKAI.ClientDensity.GetEffectivePedDensityFactor = getEffectivePedDensityFactor
 CBKAI.ClientDensity.GetEffectiveVehicleDensityFactor = getEffectiveVehicleDensityFactor
+CBKAI.ClientDensity.GetEffectiveParkedVehicleDensityFactor = getEffectiveParkedVehicleDensityFactor
 
 local function applyDensity(config)
     config = config or {}

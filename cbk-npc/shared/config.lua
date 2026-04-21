@@ -59,10 +59,15 @@ CBKAI_LoadLegacyConfig = function()
 end
 
 local defaults = {
+    Advanced = {
+        clearAmbientGarbageOnClear = false,
+    },
     Security = {
         rateLimitWindowMs = 5000,
         requestInitMaxCalls = 12,
         runtimeReportMaxCalls = 24,
+        panelAdminActionMaxCalls = 12,
+        panelLockTimeoutMs = 300000,
         maxPayloadNodes = 2500,
         maxPayloadDepth = 12,
         commandCooldownMs = 1000,

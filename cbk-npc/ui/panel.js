@@ -1,6 +1,8 @@
 const resourceName = typeof GetParentResourceName === "function" ? GetParentResourceName() : "cbk-npc";
 
 const root = document.getElementById("root");
+const panelShell = document.getElementById("panelShell");
+const panelHeader = document.getElementById("panelHeader");
 const sectionNav = document.getElementById("sectionNav");
 const searchInput = document.getElementById("searchInput");
 const sectionsEl = document.getElementById("sections");
@@ -35,6 +37,128 @@ const uiState = {
   selectedCategory: "All",
   searchTerm: "",
 };
+const panelDragState = {
+  pointerId: null,
+  offsetX: 0,
+  offsetY: 0,
+  customPosition: false,
+};
+const PANEL_MARGIN = 12;
+
+function isPanelOpen() {
+  return root && !root.classList.contains("hidden");
+}
+
+function clampPanelPosition(left, top) {
+  const width = panelShell ? panelShell.offsetWidth : 0;
+  const height = panelShell ? panelShell.offsetHeight : 0;
+  const maxLeft = Math.max(PANEL_MARGIN, window.innerWidth - width - PANEL_MARGIN);
+  const maxTop = Math.max(PANEL_MARGIN, window.innerHeight - height - PANEL_MARGIN);
+
+  return {
+    left: clampNumber(left, PANEL_MARGIN, maxLeft),
+    top: clampNumber(top, PANEL_MARGIN, maxTop),
+  };
+}
+
+function getCenteredPanelPosition() {
+  const width = panelShell ? panelShell.offsetWidth : 0;
+  const height = panelShell ? panelShell.offsetHeight : 0;
+  return clampPanelPosition(
+    Math.round((window.innerWidth - width) / 2),
+    Math.round((window.innerHeight - height) / 2)
+  );
+}
+
+function applyPanelPosition(left, top) {
+  if (!panelShell) {
+    return;
+  }
+
+  const clamped = clampPanelPosition(left, top);
+  panelShell.classList.add("is-positioned");
+  panelShell.style.left = `${clamped.left}px`;
+  panelShell.style.top = `${clamped.top}px`;
+}
+
+function syncPanelPosition(forceCenter = false) {
+  if (!panelShell || !isPanelOpen()) {
+    return;
+  }
+
+  if (!panelDragState.customPosition || forceCenter) {
+    const centered = getCenteredPanelPosition();
+    applyPanelPosition(centered.left, centered.top);
+    if (forceCenter) {
+      panelDragState.customPosition = false;
+      panelShell.classList.remove("is-positioned");
+      panelShell.style.left = "";
+      panelShell.style.top = "";
+    }
+    return;
+  }
+
+  applyPanelPosition(panelShell.offsetLeft, panelShell.offsetTop);
+}
+
+function endPanelDrag() {
+  if (panelDragState.pointerId === null) {
+    return;
+  }
+
+  panelDragState.pointerId = null;
+  root.classList.remove("is-dragging");
+  panelShell.classList.remove("is-dragging");
+}
+
+function handlePanelDragStart(event) {
+  if (!panelShell || !panelHeader || !isPanelOpen()) {
+    return;
+  }
+
+  if (event.pointerType === "mouse" && event.button !== 0) {
+    return;
+  }
+
+  if (event.target.closest("button, input, select, textarea, label, a")) {
+    return;
+  }
+
+  const rect = panelShell.getBoundingClientRect();
+  panelDragState.pointerId = event.pointerId;
+  panelDragState.offsetX = event.clientX - rect.left;
+  panelDragState.offsetY = event.clientY - rect.top;
+  panelDragState.customPosition = true;
+
+  applyPanelPosition(rect.left, rect.top);
+  root.classList.add("is-dragging");
+  panelShell.classList.add("is-dragging");
+  panelHeader.setPointerCapture(event.pointerId);
+  event.preventDefault();
+}
+
+function handlePanelDragMove(event) {
+  if (panelDragState.pointerId === null || event.pointerId !== panelDragState.pointerId) {
+    return;
+  }
+
+  applyPanelPosition(
+    event.clientX - panelDragState.offsetX,
+    event.clientY - panelDragState.offsetY
+  );
+}
+
+function handlePanelDragEnd(event) {
+  if (panelDragState.pointerId === null || event.pointerId !== panelDragState.pointerId) {
+    return;
+  }
+
+  if (panelHeader && panelHeader.hasPointerCapture(event.pointerId)) {
+    panelHeader.releasePointerCapture(event.pointerId);
+  }
+
+  endPanelDrag();
+}
 
 function formatEpoch(epoch) {
   if (!epoch) return "\u2014";
@@ -614,6 +738,9 @@ window.addEventListener("message", (event) => {
       searchInput.value = "";
     }
     root.classList.remove("hidden");
+    requestAnimationFrame(() => {
+      syncPanelPosition();
+    });
     postNui("cbk:requestProfiles").catch(() => {
       showToast("Profile list refresh failed", "error");
     });
@@ -621,6 +748,7 @@ window.addEventListener("message", (event) => {
   }
 
   if (data.action === "cbk:close") {
+    endPanelDrag();
     root.classList.add("hidden");
     return;
   }
@@ -642,7 +770,21 @@ window.addEventListener("message", (event) => {
 
 closeBtn.addEventListener("click", () => {
   postNui("cbk:close").catch(() => {
+    endPanelDrag();
     root.classList.add("hidden");
+  });
+});
+
+if (panelHeader) {
+  panelHeader.addEventListener("pointerdown", handlePanelDragStart);
+}
+
+window.addEventListener("pointermove", handlePanelDragMove);
+window.addEventListener("pointerup", handlePanelDragEnd);
+window.addEventListener("pointercancel", handlePanelDragEnd);
+window.addEventListener("resize", () => {
+  requestAnimationFrame(() => {
+    syncPanelPosition();
   });
 });
 
@@ -702,6 +844,7 @@ if (searchInput) {
 document.addEventListener("keyup", (event) => {
   if (event.key === "Escape") {
     postNui("cbk:close").catch(() => {
+      endPanelDrag();
       root.classList.add("hidden");
     });
   }

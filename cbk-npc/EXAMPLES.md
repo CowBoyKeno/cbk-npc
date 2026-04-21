@@ -1,5 +1,7 @@
 # Example Configurations
 
+Version 6.0.0
+
 These examples match the ambient-only runtime that ships in this repository.
 
 Copy only the sections you want into config.lua, then run `/npcreload`.

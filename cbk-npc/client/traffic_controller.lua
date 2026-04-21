@@ -176,6 +176,21 @@ local function isVehiclePlayerOccupied(vehicle)
     return false
 end
 
+local function isVehicleOccupiedByAnyPed(vehicle)
+    if vehicle == 0 or not DoesEntityExist(vehicle) then
+        return false
+    end
+
+    local maxPassengers = GetVehicleMaxNumberOfPassengers(vehicle)
+    for seat = -1, maxPassengers - 1 do
+        if GetPedInVehicleSeat(vehicle, seat) ~= 0 then
+            return true
+        end
+    end
+
+    return false
+end
+
 local function updatePlayerVehicleTracking()
     local currentVehicle = GetVehiclePedIsIn(PlayerPedId(), false)
     if currentVehicle ~= 0 and DoesEntityExist(currentVehicle) then
@@ -221,10 +236,14 @@ end
 local function applyWantedSettings(cfg)
     local wanted = cfg.WantedSystem or {}
     local npcBehavior = cfg.NPCBehavior or {}
+    local relationships = cfg.Relationships or {}
     local crimeReportsEnabled = wanted.npcReportCrimes == true
         and (wanted.npcReportVehicleTheft == true
             or wanted.npcReportAssault == true
             or wanted.npcReportShooting == true)
+    local hostileCopsToPlayer = relationships.enabled == true
+        and (tonumber(relationships.copsToPlayer) or 3) >= 4
+        and npcBehavior.disableNPCCombat ~= true
 
     local staticKey = table.concat({
         tostring(wanted.disablePoliceResponse == true),
@@ -269,9 +288,8 @@ local function applyWantedSettings(cfg)
 
     SetPoliceIgnorePlayer(
         PlayerId(),
-        wanted.disablePoliceChase == true
-            or wanted.disablePoliceResponse == true
-            or npcBehavior.ignorePlayer == true
+        npcBehavior.ignorePlayer == true
+            or ((wanted.disablePoliceChase == true or wanted.disablePoliceResponse == true) and not hostileCopsToPlayer)
     )
 
     if wanted.disableWantedLevel then
@@ -290,33 +308,60 @@ local function trimAmbientVehicles(cfg, vehicles, playerCoords, playerVehicle)
     local vehicleDensityFactor = type(densityApi.GetEffectiveVehicleDensityFactor) == 'function'
         and densityApi.GetEffectiveVehicleDensityFactor(cfg)
         or 1.0
-    maxVehicles = math.max(0, math.floor(maxVehicles * multiplier))
-    if math.max(0.0, math.min(1.0, vehicleDensityFactor)) <= 0.0 then
-        maxVehicles = 0
+    local parkedVehicleDensityFactor = type(densityApi.GetEffectiveParkedVehicleDensityFactor) == 'function'
+        and densityApi.GetEffectiveParkedVehicleDensityFactor(cfg)
+        or 1.0
+    local normalizedVehicleDensityFactor = math.max(0.0, math.min(1.0, vehicleDensityFactor))
+    local normalizedParkedVehicleDensityFactor = math.max(0.0, math.min(1.0, parkedVehicleDensityFactor))
+    local baseVehicleCap = math.max(0, math.floor(maxVehicles * multiplier))
+    local movingVehicleCap = baseVehicleCap
+    local parkedVehicleCap = baseVehicleCap
+
+    if normalizedVehicleDensityFactor <= 0.0 then
+        movingVehicleCap = 0
+    elseif normalizedVehicleDensityFactor < 0.999 and movingVehicleCap > 0 then
+        -- Keep the ambient trim cap aligned with the live density slider so
+        -- low-but-nonzero values visibly reduce nearby traffic.
+        movingVehicleCap = math.max(1, math.floor((movingVehicleCap * normalizedVehicleDensityFactor) + 0.5))
     end
-    local ambientVehicles = {}
+
+    if normalizedParkedVehicleDensityFactor <= 0.0 then
+        parkedVehicleCap = 0
+    elseif normalizedParkedVehicleDensityFactor < 0.999 and parkedVehicleCap > 0 then
+        parkedVehicleCap = math.max(1, math.floor((parkedVehicleCap * normalizedParkedVehicleDensityFactor) + 0.5))
+    end
+
+    local movingAmbientVehicles = {}
+    local parkedAmbientVehicles = {}
 
     for i = 1, #vehicles do
         local vehicle = vehicles[i]
         if isAmbientVehicleEntity(vehicle) and vehicle ~= playerVehicle and not isProtectedPlayerVehicle(vehicle, cfg, playerCoords) then
             local driver = GetPedInVehicleSeat(vehicle, -1)
-            if driver == 0 or not IsPedAPlayer(driver) then
-                ambientVehicles[#ambientVehicles + 1] = vehicle
+            if driver ~= 0 and not IsPedAPlayer(driver) then
+                movingAmbientVehicles[#movingAmbientVehicles + 1] = vehicle
+            elseif driver == 0 and not isVehicleOccupiedByAnyPed(vehicle) then
+                parkedAmbientVehicles[#parkedAmbientVehicles + 1] = vehicle
             end
         end
     end
 
-    if #ambientVehicles <= maxVehicles then
-        return
+    local function trimVehicleBucket(bucket, cap)
+        if #bucket <= cap then
+            return
+        end
+
+        table.sort(bucket, function(a, b)
+            return #(GetEntityCoords(a) - playerCoords) > #(GetEntityCoords(b) - playerCoords)
+        end)
+
+        for index = cap + 1, #bucket do
+            deleteVehicleSafely(bucket[index])
+        end
     end
 
-    table.sort(ambientVehicles, function(a, b)
-        return #(GetEntityCoords(a) - playerCoords) > #(GetEntityCoords(b) - playerCoords)
-    end)
-
-    for i = maxVehicles + 1, #ambientVehicles do
-        deleteVehicleSafely(ambientVehicles[i])
-    end
+    trimVehicleBucket(movingAmbientVehicles, movingVehicleCap)
+    trimVehicleBucket(parkedAmbientVehicles, parkedVehicleCap)
 end
 
 local function applyStaticVehicleSuppression(settings)
@@ -428,9 +473,7 @@ local function enforceVehicleSuppression(cfg, vehicles, playerCoords)
     end
 
     local playerVehicle = GetVehiclePedIsIn(PlayerPedId(), false)
-    if settings.enableTraffic == false then
-        trimAmbientVehicles({ VehicleSettings = { maxVehicles = 0 }, Advanced = cfg.Advanced }, vehicles, playerCoords, playerVehicle)
-    elseif settings.maxVehicles then
+    if settings.maxVehicles or settings.enableTraffic == false then
         trimAmbientVehicles(cfg, vehicles, playerCoords, playerVehicle)
     end
 end
@@ -1112,7 +1155,8 @@ CreateThread(function()
         local playerCoords = GetEntityCoords(PlayerPedId())
         local vehiclePool = GetGamePool('CVehicle') or {}
         local now = GetGameTimer()
-        local suppressionSweepInterval = math.max(750, math.min(2000, (cfg.Advanced and cfg.Advanced.updateInterval) or 1000))
+        local updateInterval = math.max(250, math.floor(tonumber((cfg.Advanced and cfg.Advanced.updateInterval) or 1000) or 1000))
+        local suppressionSweepInterval = math.max(750, updateInterval)
         local enableNPCs = cfg.EnableNPCs ~= false
 
         if lastEnableNPCsState == nil or lastEnableNPCsState ~= enableNPCs then
@@ -1334,8 +1378,7 @@ CreateThread(function()
         end
         end
 
-        local updateInterval = (cfg.Advanced and cfg.Advanced.updateInterval) or 1000
-        Wait(math.max(100, math.min(250, updateInterval)))
+        Wait(updateInterval)
     end
 end)
 

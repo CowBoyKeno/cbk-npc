@@ -243,6 +243,31 @@ local function getIndexedPlayerCount(index)
     return total
 end
 
+local function isTrafficContextBroadcastEnabled(config)
+    if type(config) ~= 'table' or config.EnableNPCs == false then
+        return false
+    end
+
+    local vehicleSettings = type(config.VehicleSettings) == 'table' and config.VehicleSettings or {}
+    if vehicleSettings.enableTraffic == false then
+        return false
+    end
+
+    return vehicleSettings.vehiclesAvoidPlayer ~= false
+end
+
+local function getTrafficContextLoopIntervalMs(config, disabled)
+    local advanced = type(config) == 'table' and config.Advanced or nil
+    local baseInterval = math.floor(tonumber(advanced and advanced.updateInterval) or 1000)
+    baseInterval = clamp(baseInterval, 250, 60000)
+
+    if disabled then
+        return math.max(1000, baseInterval)
+    end
+
+    return math.max(250, math.min(1000, baseInterval))
+end
+
 local function recordTrafficContextCycle(indexedOnFootPlayers, targetedPlayers, totalAnchors, maxAnchorsInPayload)
     trafficContextTelemetry.cycles = trafficContextTelemetry.cycles + 1
     trafficContextTelemetry.indexedOnFootPlayers = trafficContextTelemetry.indexedOnFootPlayers + indexedOnFootPlayers
@@ -332,12 +357,21 @@ if Config.Commands.enabled then
             return
         end
 
+        local activeConfig = (CBKAI.ConfigSync and CBKAI.ConfigSync.GetConfig and CBKAI.ConfigSync.GetConfig()) or Config
+        local clearAmbientGarbage = type(activeConfig) == 'table'
+            and type(activeConfig.Advanced) == 'table'
+            and activeConfig.Advanced.clearAmbientGarbageOnClear == true
         local protectedVehicleNetIds = aggregateProtectedVehicleNetIds(30000)
         runtimeReports = {}
         TriggerClientEvent('cbk_ai:cl:clearWorld', -1, {
             protectedVehicleNetIds = protectedVehicleNetIds,
+            clearAmbientGarbage = clearAmbientGarbage,
         })
-        sendChat(source, ('Clear request broadcast to all clients. Ambient NPCs and vehicles are being purged while protecting %d player vehicle(s).'):format(#protectedVehicleNetIds), { 255, 255, 0 })
+        local output = ('Clear request broadcast to all clients. Ambient NPCs and vehicles are being purged while protecting %d player vehicle(s).'):format(#protectedVehicleNetIds)
+        if clearAmbientGarbage then
+            output = output .. ' Common ambient garbage props are included.'
+        end
+        sendChat(source, output, { 255, 255, 0 })
     end, false)
 
     RegisterCommand(Config.Commands.countCommand, function(source)
@@ -418,6 +452,12 @@ end)
 
 CreateThread(function()
     while true do
+        local activeConfig = (CBKAI.ConfigSync and CBKAI.ConfigSync.GetConfig and CBKAI.ConfigSync.GetConfig()) or Config
+        if not isTrafficContextBroadcastEnabled(activeConfig) then
+            Wait(getTrafficContextLoopIntervalMs(activeConfig, true))
+            goto continue_traffic_context
+        end
+
         local t0 = GetGameTimer()
         local players = GetPlayers()
         local onFootSpatialIndex = buildOnFootSpatialIndex(players)
@@ -448,7 +488,9 @@ CreateThread(function()
         local t1 = GetGameTimer()
         Log.perfMarker(('TrafficContextLoop: %d players, %d ms'), #players, t1 - t0)
 
-        Wait(500)
+        Wait(getTrafficContextLoopIntervalMs(activeConfig, false))
+
+        ::continue_traffic_context::
     end
 end)
 
