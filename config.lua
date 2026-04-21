@@ -352,8 +352,8 @@ Config.Security = {
     allowConsole = true,                      -- Allows server console to run protected commands.
     allowAcePermissions = false,              -- Enables ACE permission path. If false, adminIdentifiers list is primary.
     adminIdentifiers = {
-        'fivem:18296635',                     -- Authorized identifier example.
-        'discord:1043241558503337994',        -- Authorized identifier example.
+        'fivem:12345678',                     -- Authorized identifier example.
+        'discord:1234567890987654321',        -- Authorized identifier example.
     },
     rateLimitWindowMs = 5000,                 -- Shared rate-limit window for protected client events.
     requestInitMaxCalls = 12,                 -- Max init requests per player per rate-limit window.
