@@ -143,12 +143,19 @@ local syncState = {
     config = deepCopy(Config),
     revision = 1,
 }
+local startupCommandsConfig = deepCopy(Config.Commands or {})
 
 local panelLock = {
     owner = 0,
     ownerName = nil,
     acquiredAt = 0,
 }
+
+local function clearPanelLock()
+    panelLock.owner = 0
+    panelLock.ownerName = nil
+    panelLock.acquiredAt = 0
+end
 
 local PANEL_PROFILE_FILE = 'profiles/cbk_panel_runtime.json'
 local PANEL_PROFILE_DIR = 'profiles/cbk_panel/'
@@ -434,7 +441,42 @@ local function getPlayerNameSafe(source)
     return name
 end
 
+local function getPanelLockTimeoutMs()
+    local timeoutMs = math.floor(tonumber((Config.Security or {}).panelLockTimeoutMs) or 300000)
+    if timeoutMs < 0 then
+        return 0
+    end
+    if timeoutMs > 86400000 then
+        return 86400000
+    end
+    return timeoutMs
+end
+
+local function reapStalePanelLock()
+    if panelLock.owner == 0 then
+        return false
+    end
+
+    local ownerName = getPlayerNameSafe(panelLock.owner)
+    if type(ownerName) ~= 'string' or ownerName == '' then
+        clearPanelLock()
+        return true
+    end
+
+    panelLock.ownerName = ownerName
+
+    local timeoutMs = getPanelLockTimeoutMs()
+    if timeoutMs > 0 and panelLock.acquiredAt > 0 and (GetGameTimer() - panelLock.acquiredAt) >= timeoutMs then
+        clearPanelLock()
+        return true
+    end
+
+    return false
+end
+
 local function getLockOwnerLabel()
+    reapStalePanelLock()
+
     if panelLock.owner == 0 then
         return 'none'
     end
@@ -447,6 +489,8 @@ local function getLockOwnerLabel()
 end
 
 local function canUsePanelLock(source)
+    reapStalePanelLock()
+
     if panelLock.owner == 0 or panelLock.owner == source then
         return true
     end
@@ -465,9 +509,7 @@ local function releasePanelLock(source)
         return false
     end
 
-    panelLock.owner = 0
-    panelLock.ownerName = nil
-    panelLock.acquiredAt = 0
+    clearPanelLock()
     return true
 end
 
@@ -677,10 +719,14 @@ local function normalizeConfig(config)
     config.Security.rateLimitWindowMs = clampInt(config.Security.rateLimitWindowMs, 250, 600000)
     config.Security.requestInitMaxCalls = clampInt(config.Security.requestInitMaxCalls, 1, 120)
     config.Security.runtimeReportMaxCalls = clampInt(config.Security.runtimeReportMaxCalls, 1, 240)
+    config.Security.panelAdminActionMaxCalls = clampInt(config.Security.panelAdminActionMaxCalls, 1, 120)
+    config.Security.panelLockTimeoutMs = clampInt(config.Security.panelLockTimeoutMs, 0, 86400000)
     config.Security.maxPayloadNodes = clampInt(config.Security.maxPayloadNodes, 64, 20000)
     config.Security.maxPayloadDepth = clampInt(config.Security.maxPayloadDepth, 2, 32)
     config.Security.commandCooldownMs = clampInt(config.Security.commandCooldownMs, 100, 60000)
     config.Security.telemetryIntervalMs = clampInt(config.Security.telemetryIntervalMs, 10000, 3600000)
+
+    config.Commands = deepCopy(startupCommandsConfig)
 
     return config
 end
@@ -768,6 +814,7 @@ extendPanelEditablePaths({
     ['NPCBehavior.moveRateOverride'] = { type = 'number', min = 0.0, max = 1.15 },
     ['NPCBehavior.disableNPCDriving'] = { type = 'boolean' },
     ['NPCBehavior.respectTrafficLights'] = { type = 'boolean' },
+    ['NPCBehavior.respectStopSigns'] = { type = 'boolean' },
     ['NPCBehavior.avoidTraffic'] = { type = 'boolean' },
     ['NPCBehavior.disableAmbientSpeech'] = { type = 'boolean' },
     ['NPCBehavior.disableAmbientHorns'] = { type = 'boolean' },
@@ -849,6 +896,7 @@ extendPanelEditablePaths({
 
     ['Advanced.standaloneAmbientControl'] = { type = 'boolean' },
     ['Advanced.autoCleanupEnabled'] = { type = 'boolean' },
+    ['Advanced.clearAmbientGarbageOnClear'] = { type = 'boolean' },
     ['Advanced.deleteDeadNPCs'] = { type = 'boolean' },
     ['Advanced.cleanupDeadNPCsAfterMs'] = { type = 'number', min = 0, max = 3600000, integer = true },
     ['Advanced.deleteWreckedEmptyVehicles'] = { type = 'boolean' },
@@ -977,9 +1025,12 @@ local function reloadConfigFromDisk()
         return false, err
     end
 
+    local reloadedCommands = deepCopy((Config and Config.Commands) or {})
+    local commandSurfaceChanged = not deepEqual(reloadedCommands, startupCommandsConfig)
+
     local normalized = normalizeConfig(deepCopy(Config))
     applyServerConfig(normalized)
-    return true
+    return true, commandSurfaceChanged and 'commands_restart_required' or nil
 end
 
 CBKAI.ConfigSync = {
@@ -1148,10 +1199,7 @@ RegisterNetEvent('cbk_ai:sv:panelClose', function()
     end
 
     if releasePanelLock(source) then
-        TriggerClientEvent('cbk_ai:cl:panelNotice', source, {
-            tone = 'ok',
-            message = 'Panel lock released.'
-        })
+        auditPanelEvent(source, 'closePanel', '')
     end
 end)
 
@@ -1389,6 +1437,16 @@ RegisterNetEvent('cbk_ai:sv:panelReleaseLock', function()
         return
     end
 
+    reapStalePanelLock()
+
+    if panelLock.owner == 0 then
+        TriggerClientEvent('cbk_ai:cl:panelNotice', source, {
+            tone = 'ok',
+            message = 'Panel lock was already clear.'
+        })
+        return
+    end
+
     if panelLock.owner ~= source then
         TriggerClientEvent('cbk_ai:cl:panelAck', source, {
             ok = false,
@@ -1426,13 +1484,18 @@ if Config.Commands.enabled then
             return
         end
 
-        local reloaded, err = CBKAI.ConfigSync.ReloadFromDisk()
+        local reloaded, reloadInfo = CBKAI.ConfigSync.ReloadFromDisk()
         if not reloaded then
-            sendChat(source, ('Config reload failed: %s'):format(err or 'unknown error'), { 255, 0, 0 })
+            sendChat(source, ('Config reload failed: %s'):format(reloadInfo or 'unknown error'), { 255, 0, 0 })
             return
         end
 
-        sendChat(source, 'Configuration reloaded and synchronized.', { 0, 255, 0 })
+        local successMessage = 'Configuration reloaded and synchronized.'
+        if reloadInfo == 'commands_restart_required' then
+            successMessage = successMessage .. ' Command and panel-key changes still require a resource restart to take effect.'
+        end
+
+        sendChat(source, successMessage, { 0, 255, 0 })
     end, false)
 
     RegisterCommand(Config.Commands.toggleCommand, function(source)
@@ -1513,16 +1576,17 @@ if Config.Commands.enabled then
             return
         end
 
-        if source ~= 0 and panelLock.owner ~= 0 and panelLock.owner ~= source then
-            sendChat(source, ('Panel lock is held by %s.'):format(getLockOwnerLabel()), { 255, 0, 0 })
+        reapStalePanelLock()
+
+        local previousOwner = getLockOwnerLabel()
+        if previousOwner == 'none' then
+            sendChat(source, 'Panel lock is not currently held.', { 255, 255, 0 })
             return
         end
 
-        panelLock.owner = 0
-        panelLock.ownerName = nil
-        panelLock.acquiredAt = 0
-        sendChat(source, 'Panel lock released.', { 0, 255, 0 })
-        auditPanelEvent(source, 'commandReleaseLock', '')
+        clearPanelLock()
+        sendChat(source, ('Panel lock released. Previous owner: %s'):format(previousOwner), { 0, 255, 0 })
+        auditPanelEvent(source, 'commandReleaseLock', ('previousOwner=%s'):format(previousOwner))
     end, false)
 
     RegisterCommand(Config.Commands.validateCommand or 'npcvalidate', function(source)
@@ -1578,9 +1642,7 @@ end
 
 AddEventHandler('playerDropped', function()
     if panelLock.owner == source then
-        panelLock.owner = 0
-        panelLock.ownerName = nil
-        panelLock.acquiredAt = 0
+        clearPanelLock()
     end
 end)
 

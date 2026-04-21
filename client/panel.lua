@@ -81,6 +81,7 @@ local controls = {
         toggle('NPCBehavior.disableNPCDriving', 'Disable NPC Driving'),
         selectField('NPCBehavior.npcDrivingStyle', 'NPC Driving Style', { 'normal', 'careful', 'reckless', 'ignored' }),
         toggle('NPCBehavior.respectTrafficLights', 'Respect Traffic Lights'),
+        toggle('NPCBehavior.respectStopSigns', 'Respect Stop Signs'),
         toggle('NPCBehavior.avoidTraffic', 'Avoid Traffic'),
     }),
     section('Ped Reactions', 'Ped AI', 'Ambient reactions, speech, horns, and idle animation responses.', {
@@ -213,6 +214,7 @@ local controls = {
         toggle('Advanced.autoCleanupEnabled', 'Auto Cleanup Enabled'),
         slider('Advanced.cleanupDistance', 'Cleanup Distance', 100.0, 5000.0, 25.0),
         slider('Advanced.cleanupInterval', 'Cleanup Interval (ms)', 1000, 300000, 500),
+        toggle('Advanced.clearAmbientGarbageOnClear', 'Clear Ambient Garbage On World Clear'),
         toggle('Advanced.deleteDeadNPCs', 'Delete Dead NPCs'),
         slider('Advanced.cleanupDeadNPCsAfterMs', 'Dead NPC Cleanup (ms)', 0, 3600000, 1000),
         toggle('Advanced.deleteWreckedEmptyVehicles', 'Delete Wrecked Vehicles'),
@@ -239,6 +241,7 @@ end
 local function getControlPresentation(path, cfg)
     local population = cfg.PopulationDensity or {}
     local spawnControl = cfg.SpawnControl or {}
+    local npcBehavior = cfg.NPCBehavior or {}
     local vehicleSettings = cfg.VehicleSettings or {}
     local emergency = vehicleSettings.emergencyVehicleBehavior or {}
     local scenarioSettings = cfg.ScenarioSettings or {}
@@ -315,6 +318,35 @@ local function getControlPresentation(path, cfg)
 
     if path ~= 'Relationships.enabled' and path:match('^Relationships%.') and relationships.enabled ~= true then
         return true, 'Relationships Enabled is off'
+    end
+
+    if path ~= 'Relationships.enabled' and path:match('^Relationships%.') and npcBehavior.disableNPCCombat == true then
+        return false, 'Disable NPC Combat is on'
+    end
+
+    if path == 'Relationships.copsToPlayer' and (wanted.disablePoliceResponse == true or wanted.disablePoliceChase == true) then
+        return false, 'Police response or chase suppression can mask this'
+    end
+
+    if (path == 'NPCBehavior.pedSeeingRange' or path == 'NPCBehavior.pedHearingRange')
+        and npcBehavior.disableNPCCombat == true
+        and npcBehavior.fleeFromPlayer ~= true
+    then
+        return false, 'Most visible when combat or flee behavior is active'
+    end
+
+    if (path == 'NPCBehavior.respectTrafficLights' or path == 'NPCBehavior.respectStopSigns')
+        and vehicleSettings.vehiclesRespectLights == false
+    then
+        return false, 'Vehicles Respect Lights is off'
+    end
+
+    if path == 'NPCBehavior.disableAmbientSpeech'
+        or path == 'NPCBehavior.disableAmbientAnims'
+        or path == 'NPCBehavior.disableAmbientBaseAnims'
+        or path == 'NPCBehavior.disableGestureAnims'
+    then
+        return false, 'Most visible on nearby on-foot ambient peds'
     end
 
     if path ~= 'Events.enabled' and path:match('^Events%.') and events.enabled ~= true then
@@ -684,7 +716,7 @@ RegisterNetEvent('cbk_ai:cl:panelAck', function(payload)
         return
     end
 
-    if panelState.open and not payload.path then
+    if panelState.open and payload.path then
         SendNUIMessage({
             action = 'cbk:toast',
             tone = 'ok',

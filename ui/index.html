@@ -9,8 +9,8 @@
 <body>
   <div id="root" class="panel-root hidden">
     <div class="bg-grid"></div>
-    <div class="panel-shell">
-      <header class="panel-header">
+    <div id="panelShell" class="panel-shell">
+      <header id="panelHeader" class="panel-header">
         <div>
           <div class="kicker">Runtime Editor</div>
           <h1>CBK PANEL</h1>
@@ -38,7 +38,7 @@
       <footer class="panel-footer">
         <div class="profile-row">
           <input id="profileNameInput" class="profile-input" type="text" maxlength="40" placeholder="profile name" />
-          <select id="profileSelect" class="profile-select"></select>
+          <select id="profileSelect" class="profile-select" title="Select saved profile" aria-label="Select saved profile"></select>
           <button id="saveNamedBtn" class="action-btn" type="button">Save As</button>
           <button id="loadNamedBtn" class="action-btn" type="button">Load Selected</button>
           <button id="cloneProfileBtn" class="action-btn" type="button">Clone</button>
