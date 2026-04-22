@@ -692,6 +692,55 @@ local function normalizeConfig(config)
     emergency.minBehindDistanceForResponse = clamp(emergency.minBehindDistanceForResponse, 0.0, 200.0)
     emergency.courtesyRadius = clamp(emergency.courtesyRadius, 0.0, 500.0)
 
+    if emergency.slowPassEnabled ~= false then
+        emergency.slowPassRadius = clamp(
+            math.max(emergency.slowPassRadius, emergency.stoppedEmergencyBubbleRadius + 10.0, 10.0),
+            10.0,
+            300.0
+        )
+        emergency.stoppedEmergencyMaxSpeedMph = clamp(
+            math.min(emergency.stoppedEmergencyMaxSpeedMph, emergency.slowPassSpeed),
+            0.0,
+            40.0
+        )
+        emergency.safeBypassSpeedMph = clamp(
+            math.max(emergency.safeBypassSpeedMph, emergency.slowPassSpeed),
+            0.0,
+            80.0
+        )
+    end
+
+    emergency.safeBypassLateralOffset = clamp(
+        math.max(emergency.safeBypassLateralOffset, emergency.safeBypassClearanceRadius + 0.75),
+        1.0,
+        20.0
+    )
+    emergency.safeBypassLookAhead = clamp(
+        math.max(emergency.safeBypassLookAhead, emergency.safeBypassLateralOffset * 1.5),
+        2.0,
+        80.0
+    )
+    emergency.stoppedEmergencyHardStopRadius = clamp(
+        math.min(emergency.stoppedEmergencyHardStopRadius, emergency.stoppedEmergencyBubbleRadius),
+        0.0,
+        75.0
+    )
+    emergency.courtesyRadius = clamp(
+        math.max(emergency.courtesyRadius, emergency.stoppedEmergencyBubbleRadius),
+        0.0,
+        500.0
+    )
+    emergency.stoppedEmergencyBubbleSearchRadius = clamp(
+        math.max(emergency.stoppedEmergencyBubbleSearchRadius, emergency.courtesyRadius),
+        0.0,
+        500.0
+    )
+    emergency.minBehindDistanceForResponse = clamp(
+        math.min(emergency.minBehindDistanceForResponse, emergency.stoppedEmergencyBubbleRadius),
+        0.0,
+        200.0
+    )
+
     config.WantedSystem.maxWantedLevel = clampInt(config.WantedSystem.maxWantedLevel, 0, 5)
 
     config.Relationships.playerToNPC = clampInt(config.Relationships.playerToNPC, 0, 5)

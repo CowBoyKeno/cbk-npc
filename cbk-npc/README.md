@@ -168,17 +168,15 @@ Recommended smoke test after config changes:
 4. Drive an emergency vehicle with emergency lights active, and with siren audio active as well if `requireSiren = true`, and confirm traffic pulls over or slow-passes as expected.
 5. Step out on or near a road and confirm ambient traffic slows or routes around you when `vehiclesAvoidPlayer = true`.
 
-## Audit Snapshot (03-21-2026)
+## Runtime Notes (2026-04-22)
 
-- No critical exploit paths identified in the current ambient-only runtime.
-- Server-side authority, event rate limits, payload safety checks, and config normalization are present and active.
-- Medium-scale risk remains in 120-player scenarios from:
-    - 500ms traffic-context fanout that scales with player-to-player proximity checks.
-    - repeated client pool scans in high-density scenes.
+- Server-side authority, event rate limits, payload safety checks, and config normalization remain active.
+- Emergency traffic control now reserves exclusive ownership of ambient NPC drivers while slow-pass, stopped-emergency, or pedestrian-avoidance tasks are active, so the ambient driver loop does not overwrite those tasks mid-maneuver.
+- Stopped-emergency lead ownership is computed once per anchor per traffic update. Only the lead vehicle gets bypass authority; followers stay in managed slow-pass instead of stacking side-by-side passes.
+- Live panel edits are normalized with cross-field emergency invariants before broadcast. Conflicting bubble, courtesy, slow-pass, and bypass values are corrected server-side.
+- Traffic-context cadence follows `Config.Advanced.updateInterval`, clamped to a 250-1000ms active window and a 1000ms minimum when the feature is disabled.
 
-Detailed findings and recommended budgets are documented in `CODE-AUDIT-03-21-2026.md`.
-
-Recommended high-concurrency baseline:
+Recommended 120-player baseline:
 
 - `Config.Advanced.updateInterval = 1250` to `1500`
 - `Config.Advanced.maxNPCDistance = 300.0` to `400.0`
