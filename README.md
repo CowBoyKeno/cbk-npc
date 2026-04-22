@@ -1,5 +1,5 @@
 # CBK NPC CONTROLLER #
-Version 6.0.0 | 2026-04-20
+Version 6.0.0 | 04-24-2026
 
 CBK NPC CONTROLLER is an ambient-only AI and traffic policy resource for FiveM.
 
