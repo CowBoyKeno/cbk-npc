@@ -24,6 +24,77 @@ CBKAI.RuntimeState = CBKAI.RuntimeState or {
     lastStandaloneAmbientControlState = nil,
 }
 
+CBKAI.VehicleControl = CBKAI.VehicleControl or {
+    claims = {},
+}
+
+local VehicleControl = CBKAI.VehicleControl
+
+local function getVehicleControlClaim(vehicle, now)
+    local claim = VehicleControl.claims[vehicle]
+    if type(claim) ~= 'table' then
+        return nil
+    end
+
+    now = now or GetGameTimer()
+    if not DoesEntityExist(vehicle) or now > (claim.expiresAt or 0) then
+        VehicleControl.claims[vehicle] = nil
+        return nil
+    end
+
+    return claim
+end
+
+VehicleControl.Claim = function(vehicle, owner, holdMs)
+    if vehicle == 0 or not DoesEntityExist(vehicle) or type(owner) ~= 'string' or owner == '' then
+        return false
+    end
+
+    local now = GetGameTimer()
+    local expiresAt = now + math.max(250, math.floor(tonumber(holdMs) or 0))
+    local claim = getVehicleControlClaim(vehicle, now)
+
+    if claim and claim.owner ~= owner then
+        return false
+    end
+
+    VehicleControl.claims[vehicle] = {
+        owner = owner,
+        expiresAt = expiresAt,
+    }
+
+    return true
+end
+
+VehicleControl.Release = function(vehicle, owner)
+    local claim = VehicleControl.claims[vehicle]
+    if type(claim) ~= 'table' then
+        return
+    end
+
+    if owner == nil or claim.owner == owner then
+        VehicleControl.claims[vehicle] = nil
+    end
+end
+
+VehicleControl.IsClaimedByOther = function(vehicle, owner)
+    local claim = getVehicleControlClaim(vehicle)
+    return claim ~= nil and claim.owner ~= owner, claim
+end
+
+VehicleControl.ResetOwner = function(owner)
+    if type(owner) ~= 'string' or owner == '' then
+        VehicleControl.claims = {}
+        return
+    end
+
+    for vehicle, claim in pairs(VehicleControl.claims) do
+        if type(claim) ~= 'table' or claim.owner == owner or not DoesEntityExist(vehicle) then
+            VehicleControl.claims[vehicle] = nil
+        end
+    end
+end
+
 local function safeRequire(moduleName)
     if type(moduleName) ~= 'string' or moduleName == '' then
         return nil
@@ -1651,7 +1722,9 @@ local function applyAmbientNpcBehavior()
                             deleteEntitySafely(vehicle)
                         else
                             applyPedBehaviorToEntity(driver, playerPed, settings, accuracy, shootRate)
-                            applyVehicleBehaviorToDriver(driver, vehicle, settings, vehicleSettings)
+                            if not VehicleControl.IsClaimedByOther(vehicle, 'npc_manager') then
+                                applyVehicleBehaviorToDriver(driver, vehicle, settings, vehicleSettings)
+                            end
                         end
                     end
                 end
@@ -1689,6 +1762,7 @@ AddEventHandler('onResourceStop', function(resourceName)
 
     CBKAI.RuntimeState.lastEnableNPCsState = nil
     CBKAI.RuntimeState.lastStandaloneAmbientControlState = nil
+    VehicleControl.ResetOwner('traffic_controller')
     resetPedModelSuppression()
     SetEveryoneIgnorePlayer(PlayerId(), false)
     SetPoliceIgnorePlayer(PlayerId(), false)

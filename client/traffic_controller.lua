@@ -10,6 +10,7 @@ CBKAI.ClientState = CBKAI.ClientState or {
 }
 
 local speedLimitedVehicles = {}
+local speedLimitState = {}
 local hornMutedVehicles = {}
 local speechMutedDrivers = {}
 local globalHornMutedVehicles = {}
@@ -59,6 +60,16 @@ end
 local Utils = resolveUtils()
 local clamp = Utils.clamp
 local EntityGuards = CBKAI.ClientEntityGuards or {}
+local VehicleControl = CBKAI.VehicleControl or {
+    Claim = function()
+        return true
+    end,
+    Release = function()
+    end,
+    ResetOwner = function()
+    end,
+}
+local TRAFFIC_CONTROL_OWNER = 'traffic_controller'
 
 local function isAmbientVehicleEntity(vehicle)
     if type(EntityGuards.IsAmbientVehicle) == 'function' then
@@ -113,6 +124,8 @@ local function resetVehicleEmergencyState(vehicle)
         speedLimitedVehicles[vehicle] = nil
     end
 
+    speedLimitState[vehicle] = nil
+
     bypassTaskUntil[vehicle] = nil
     bubbleStuckSince[vehicle] = nil
     bypassSideLock[vehicle] = nil
@@ -140,6 +153,46 @@ local function resetVehicleEmergencyState(vehicle)
     if globalHornMutedVehicles[vehicle] and not vehicleExists then
         globalHornMutedVehicles[vehicle] = nil
     end
+
+    VehicleControl.Release(vehicle, TRAFFIC_CONTROL_OWNER)
+end
+
+local function applyManagedVehicleSpeedCap(vehicle, targetSpeed, now, options)
+    if vehicle == 0 or not DoesEntityExist(vehicle) then
+        return false, 0.0
+    end
+
+    targetSpeed = math.max(0.0, tonumber(targetSpeed) or 0.0)
+    now = now or GetGameTimer()
+
+    local state = speedLimitState[vehicle]
+    local currentSpeed = GetEntitySpeed(vehicle)
+    local previousCap = currentSpeed
+    local dt = 0.25
+
+    if type(state) == 'table' then
+        previousCap = math.max(currentSpeed, tonumber(state.cap) or currentSpeed)
+        dt = clamp((now - (state.updatedAt or now)) / 1000.0, 0.05, 1.5)
+    end
+
+    local brakeRate = math.max(0.5, tonumber(options and options.brakeRate) or 3.0)
+    local releaseRate = math.max(brakeRate, tonumber(options and options.releaseRate) or (brakeRate * 1.75))
+    local nextCap = previousCap
+
+    if previousCap > targetSpeed then
+        nextCap = math.max(targetSpeed, previousCap - (brakeRate * dt))
+    else
+        nextCap = math.min(targetSpeed, previousCap + (releaseRate * dt))
+    end
+
+    SetVehicleMaxSpeed(vehicle, nextCap)
+    speedLimitedVehicles[vehicle] = true
+    speedLimitState[vehicle] = {
+        cap = nextCap,
+        updatedAt = now,
+    }
+
+    return true, nextCap
 end
 
 local function deleteVehicleSafely(vehicle)
@@ -529,6 +582,7 @@ local function resetTrafficControllerState()
     end
 
     speedLimitedVehicles = {}
+    speedLimitState = {}
     hornMutedVehicles = {}
     speechMutedDrivers = {}
     globalHornMutedVehicles = {}
@@ -536,6 +590,7 @@ local function resetTrafficControllerState()
     bubbleStuckSince = {}
     bypassSideLock = {}
     bypassPlan = {}
+    VehicleControl.ResetOwner(TRAFFIC_CONTROL_OWNER)
 end
 
 local function isEmergencyVehicle(vehicle)
@@ -625,11 +680,16 @@ local function pointDirection(targetVehicle, pointCoords)
     return 'side'
 end
 
-local function isEmergencySirenActive(vehicle)
+local function isEmergencySignalActive(vehicle)
     if IsVehicleSirenOn(vehicle) then
         return true
     end
 
+    local ok, audioOn = pcall(IsVehicleSirenAudioOn, vehicle)
+    return ok and audioOn == true
+end
+
+local function isEmergencySirenAudioActive(vehicle)
     local ok, audioOn = pcall(IsVehicleSirenAudioOn, vehicle)
     return ok and audioOn == true
 end
@@ -643,8 +703,13 @@ local function isEmergencyActiveForResponse(vehicle, emergencyCfg)
         return false
     end
 
-    if emergencyCfg.requireSiren and not isEmergencySirenActive(vehicle) then
-        -- Stopped emergency units should still create a safety bubble even if siren is muted.
+    if not isEmergencySignalActive(vehicle) then
+        return false
+    end
+
+    if emergencyCfg.requireSiren and not isEmergencySirenAudioActive(vehicle) then
+        -- Stopped emergency units should still create a safety bubble when
+        -- emergency lights remain active but siren audio is muted.
         local stoppedThreshold = ((emergencyCfg.stoppedEmergencyMaxSpeedMph or 10.0) * 0.44704) + 0.25
         local isStoppedEmergency = emergencyCfg.stoppedEmergencyBubbleEnabled ~= false and GetEntitySpeed(vehicle) <= stoppedThreshold
         if not isStoppedEmergency then
@@ -652,7 +717,7 @@ local function isEmergencyActiveForResponse(vehicle, emergencyCfg)
         end
 
         -- Do not let the player's own current/recent emergency vehicle act as a
-        -- stopped anchor when emergency signaling is off.
+        -- stopped anchor when siren audio is off.
         local playerVehicle = GetVehiclePedIsIn(PlayerPedId(), false)
         if playerVehicle ~= 0 and vehicle == playerVehicle then
             return false
@@ -703,8 +768,9 @@ local function isBypassPathClear(subjectVehicle, emergencyVehicle, pointA, point
                     local ahead = (toOther.x * corridorDir.x) + (toOther.y * corridorDir.y) + (toOther.z * corridorDir.z)
                     local toOtherLateral = math.abs((toOther.x * corridorLeft.x) + (toOther.y * corridorLeft.y) + (toOther.z * corridorLeft.z))
                     local stationaryBlock = GetEntitySpeed(other) < 1.0 and ahead > 0.0 and toOtherLateral <= clearanceRadius
+                    local movingOccupancyBlock = GetEntitySpeed(other) >= 1.0 and ahead > 0.0 and toOtherLateral <= clearanceRadius
 
-                    if headingOpposing or stationaryBlock then
+                    if headingOpposing or stationaryBlock or movingOccupancyBlock then
                         return false
                     end
                 end
@@ -762,6 +828,7 @@ local function trySafeOncomingBypass(driver, vehicle, emergencyVehicle, emergenc
     -- Engagement distance is intentionally independent from lookAhead so increasing
     -- lookAhead only affects path shape, not how early vehicles begin bypass logic.
     local commitDistance = math.max(
+        emergencyCfg.slowPassRadius or 80.0,
         (emergencyCfg.stoppedEmergencyBubbleRadius or 20.0) * 1.75,
         (emergencyCfg.slowPassRadius or 80.0) * 0.75
     )
@@ -825,7 +892,6 @@ local function trySafeOncomingBypass(driver, vehicle, emergencyVehicle, emergenc
     end
 
     local targetPoint = nil
-    local selectedSide = nil
     local selectedSideSign = nil
     local effectiveLateral = lateralOffset
     local sideOrder = emergencyCentered and { preferredSign } or { preferredSign, fallbackSign }
@@ -857,7 +923,6 @@ local function trySafeOncomingBypass(driver, vehicle, emergencyVehicle, emergenc
             )
         then
             targetPoint = candidateTarget
-            selectedSide = side
             selectedSideSign = sideSign
             break
         end
@@ -874,34 +939,9 @@ local function trySafeOncomingBypass(driver, vehicle, emergencyVehicle, emergenc
     local forceDrivingStyle = emergencyCfg.safeBypassForceDrivingStyle or 1074528293
     local styleToUse = forceCommit and forceDrivingStyle or drivingStyle
 
-    local laneEntryPoint = vehicleCoords + (forward * (lookAhead * 0.85)) + selectedSide
-    local relToEmergency = vehicleCoords - emergencyCoords
-    local lateralFromEmergency = math.abs((relToEmergency.x * left.x) + (relToEmergency.y * left.y) + (relToEmergency.z * left.z))
-    local laneEntryNeeded = lateralFromEmergency < (effectiveLateral * 0.65)
-
     SetDriveTaskDrivingStyle(driver, styleToUse)
-    if forceCommit and laneEntryNeeded then
-        -- Phase 1: commit laterally into pass lane first.
-        TaskVehicleDriveToCoordLongrange(driver, vehicle, laneEntryPoint.x, laneEntryPoint.y, laneEntryPoint.z, bypassSpeedMps, styleToUse, 2.0)
-        bypassTaskUntil[vehicle] = now + 1200
-        bypassPlan[vehicle] = {
-            anchorVehicle = emergencyVehicle,
-            sideSign = selectedSideSign,
-            lateralOffset = effectiveLateral,
-            laneEntryPoint = laneEntryPoint,
-            targetPoint = targetPoint,
-            phase = 1,
-            phase1Until = now + 1200,
-            speedMps = bypassSpeedMps,
-            styleToUse = styleToUse,
-            expiresAt = now + 6500,
-        }
-        SetDriverAbility(driver, 1.0)
-        SetDriverAggressiveness(driver, 0.35)
-        return true, selectedSideSign
-    end
-
-    -- Phase 2: overtake and clear emergency anchor.
+    -- Use one continuous bypass target so the lead vehicle does not brake at an
+    -- intermediate lane-entry point before beginning the pass.
     TaskVehicleDriveToCoordLongrange(driver, vehicle, targetPoint.x, targetPoint.y, targetPoint.z, bypassSpeedMps, styleToUse, 10.0)
     SetDriverAbility(driver, 1.0)
     SetDriverAggressiveness(driver, forceCommit and 0.35 or 0.25)
@@ -919,47 +959,6 @@ local function trySafeOncomingBypass(driver, vehicle, emergencyVehicle, emergenc
         expiresAt = now + holdMs,
     }
     return true, selectedSideSign
-end
-
-local function hasQueueLeadVehicle(subjectVehicle, emergencyVehicle, vehicles, emergencyCfg)
-    if subjectVehicle == 0 or emergencyVehicle == 0 then
-        return false
-    end
-
-    if not DoesEntityExist(subjectVehicle) or not DoesEntityExist(emergencyVehicle) then
-        return false
-    end
-
-    local subjectCoords = GetEntityCoords(subjectVehicle)
-    local emergencyCoords = GetEntityCoords(emergencyVehicle)
-    local forward = GetEntityForwardVector(subjectVehicle)
-    local left = vector3(-forward.y, forward.x, 0.0)
-
-    local toEmergency = emergencyCoords - subjectCoords
-    local emergencyLongitudinal = (toEmergency.x * forward.x) + (toEmergency.y * forward.y) + (toEmergency.z * forward.z)
-    if emergencyLongitudinal <= 4.0 then
-        return false
-    end
-
-    local laneHalfWidth = math.max(2.8, (emergencyCfg.safeBypassClearanceRadius or 6.4) * 0.7)
-    for i = 1, #vehicles do
-        local other = vehicles[i]
-        if other ~= 0 and other ~= subjectVehicle and other ~= emergencyVehicle and DoesEntityExist(other) then
-            local otherDriver = GetPedInVehicleSeat(other, -1)
-            if otherDriver ~= 0 and not IsPedAPlayer(otherDriver) then
-                local rel = GetEntityCoords(other) - subjectCoords
-                local longitudinal = (rel.x * forward.x) + (rel.y * forward.y) + (rel.z * forward.z)
-                if longitudinal > 3.0 and longitudinal < (emergencyLongitudinal - 2.0) then
-                    local lateral = math.abs((rel.x * left.x) + (rel.y * left.y) + (rel.z * left.z))
-                    if lateral <= laneHalfWidth then
-                        return true
-                    end
-                end
-            end
-        end
-    end
-
-    return false
 end
 
 local function trySafePedestrianBypass(driver, vehicle, pedestrianCoords, emergencyCfg, vehicles)
@@ -1148,6 +1147,55 @@ local function shouldRespondToStoppedEmergency(subjectVehicle, emergencyVehicle,
     return true
 end
 
+local function buildStoppedEmergencyApproachOwners(anchors, vehicles, emergencyCfg, now)
+    local owners = {}
+    local ownerDistances = {}
+
+    for vehicle, plan in pairs(bypassPlan) do
+        if vehicle ~= 0
+            and DoesEntityExist(vehicle)
+            and type(plan) == 'table'
+            and plan.anchorVehicle ~= 0
+            and DoesEntityExist(plan.anchorVehicle)
+            and now <= (plan.expiresAt or 0)
+            and shouldRespondToStoppedEmergency(vehicle, plan.anchorVehicle, emergencyCfg)
+            and emergencyDirection(vehicle, plan.anchorVehicle) == 'front'
+        then
+            owners[plan.anchorVehicle] = vehicle
+            ownerDistances[plan.anchorVehicle] = #(GetEntityCoords(vehicle) - GetEntityCoords(plan.anchorVehicle))
+        end
+    end
+
+    for i = 1, #vehicles do
+        local vehicle = vehicles[i]
+        if vehicle ~= 0 and DoesEntityExist(vehicle) and isAmbientVehicleEntity(vehicle) then
+            local driver = GetPedInVehicleSeat(vehicle, -1)
+            if driver ~= 0 and not IsPedAPlayer(driver) then
+                local anchorVehicle, distance = getNearestEmergencyAnchor(vehicle, anchors)
+                if anchorVehicle ~= 0
+                    and emergencyDirection(vehicle, anchorVehicle) == 'front'
+                    and shouldRespondToStoppedEmergency(vehicle, anchorVehicle, emergencyCfg)
+                    and owners[anchorVehicle] == nil
+                then
+                    owners[anchorVehicle] = vehicle
+                    ownerDistances[anchorVehicle] = distance
+                elseif anchorVehicle ~= 0
+                    and emergencyDirection(vehicle, anchorVehicle) == 'front'
+                    and shouldRespondToStoppedEmergency(vehicle, anchorVehicle, emergencyCfg)
+                then
+                    local currentDistance = ownerDistances[anchorVehicle] or math.huge
+                    if distance < (currentDistance - 1.0) then
+                        owners[anchorVehicle] = vehicle
+                        ownerDistances[anchorVehicle] = distance
+                    end
+                end
+            end
+        end
+    end
+
+    return owners
+end
+
 CreateThread(function()
     while true do
         local cfg = CBKAI.ClientState.config
@@ -1156,6 +1204,7 @@ CreateThread(function()
         local vehiclePool = GetGamePool('CVehicle') or {}
         local now = GetGameTimer()
         local updateInterval = math.max(250, math.floor(tonumber((cfg.Advanced and cfg.Advanced.updateInterval) or 1000) or 1000))
+        local trafficWaitMs = updateInterval
         local suppressionSweepInterval = math.max(750, updateInterval)
         local enableNPCs = cfg.EnableNPCs ~= false
 
@@ -1193,9 +1242,15 @@ CreateThread(function()
                 anchors = collectEmergencyAnchors(emergencyCfg, vehiclePool, playerCoords)
             end
 
+            local anchorOwners = buildStoppedEmergencyApproachOwners(anchors, vehiclePool, emergencyCfg, now)
+
             local playerAnchors = {}
             if vehSettings.vehiclesAvoidPlayer ~= false then
                 playerAnchors = collectPlayerAvoidanceAnchors(math.max(emergencyCfg.courtesyRadius or 100.0, 100.0))
+            end
+
+            if #anchors > 0 or #playerAnchors > 0 or next(speedLimitedVehicles) ~= nil or next(bypassTaskUntil) ~= nil then
+                trafficWaitMs = math.min(updateInterval, 250)
             end
 
             local bubbleRadius = emergencyCfg.stoppedEmergencyBubbleRadius or math.max((emergencyCfg.slowPassRadius or 80.0) * 2.2, 120.0)
@@ -1203,7 +1258,7 @@ CreateThread(function()
             local hardStopMs = emergencyCfg.stoppedEmergencyHardStopActionMs or 1200
             local slowPassRadius = emergencyCfg.slowPassRadius or 80.0
             local approachRadius = math.max(slowPassRadius * 2.6, slowPassRadius + 45.0)
-            local bypassAttemptRadius = math.max(bubbleRadius, slowPassRadius * 0.8)
+            local bypassAttemptRadius = math.max(bubbleRadius, slowPassRadius)
             local slowPassSpeed = (emergencyCfg.slowPassSpeed or 10.0) * 0.44704
             local approachSpeed = math.max(slowPassSpeed + 1.5, 20.0 * 0.44704)
             local pedestrianResponseRadius = math.max(12.0, (emergencyCfg.stoppedEmergencyBubbleRadius or 20.0) * 0.75)
@@ -1228,35 +1283,45 @@ CreateThread(function()
                     goto continue_vehicle
                 end
 
+                local controlsTrafficFlow = speedLimitedVehicles[vehicle] == true or now < (bypassTaskUntil[vehicle] or 0)
+
                 local anchorVehicle, distance = getNearestEmergencyAnchor(vehicle, anchors)
                 local inBubble = anchorVehicle ~= 0 and distance <= bubbleRadius
-                if not inBubble then
+                local inApproachZone = anchorVehicle ~= 0 and distance <= approachRadius
+                if not inApproachZone then
                     bypassSideLock[vehicle] = nil
                     bypassPlan[vehicle] = nil
                 end
                 local approachDirection = 'side'
-                local validBubbleTarget = false
-                if inBubble then
+                local validApproachTarget = false
+                if inApproachZone then
                     approachDirection = emergencyDirection(vehicle, anchorVehicle)
-                    validBubbleTarget = shouldRespondToStoppedEmergency(vehicle, anchorVehicle, emergencyCfg)
+                    validApproachTarget = shouldRespondToStoppedEmergency(vehicle, anchorVehicle, emergencyCfg)
                 end
-                local isApproaching = inBubble and validBubbleTarget and approachDirection == 'front'
+                local isManagedApproach = inApproachZone and validApproachTarget and approachDirection ~= 'behind'
+                local isApproaching = isManagedApproach and approachDirection == 'front'
 
-                if isApproaching and emergencyCfg.slowPassEnabled then
+                if isManagedApproach and emergencyCfg.slowPassEnabled then
+                    controlsTrafficFlow = true
                     local bypassApplied = false
                     local currentSpeed = GetEntitySpeed(vehicle)
-                    local queueBlocked = hasQueueLeadVehicle(vehicle, anchorVehicle, vehiclePool, emergencyCfg)
-                    if currentSpeed <= 0.8 then
+                    local anchorOwner = isApproaching and (anchorOwners[anchorVehicle] or 0) or 0
+                    local followBlocked = anchorOwner ~= 0 and anchorOwner ~= vehicle
+                    local stuckSpeedThreshold = math.max(slowPassSpeed * 0.6, 3.0 * 0.44704)
+                    if currentSpeed <= stuckSpeedThreshold then
                         bubbleStuckSince[vehicle] = bubbleStuckSince[vehicle] or now
                     else
                         bubbleStuckSince[vehicle] = nil
                     end
                     local stuckMs = bubbleStuckSince[vehicle] and (now - bubbleStuckSince[vehicle]) or 0
-                    local forceCommit = stuckMs >= 1200
-                    if queueBlocked then
+                    local forceCommit = (not followBlocked) and (
+                        stuckMs >= 500
+                        or distance <= bypassAttemptRadius
+                    )
+                    if followBlocked then
                         bypassPlan[vehicle] = nil
                         bypassSideLock[vehicle] = nil
-                    elseif distance <= bypassAttemptRadius then
+                    elseif isApproaching and distance <= bypassAttemptRadius then
                         local selectedSideSign = nil
                         bypassApplied, selectedSideSign = trySafeOncomingBypass(
                             driver,
@@ -1279,20 +1344,23 @@ CreateThread(function()
                         end
                     else
                         local targetSpeed = slowPassSpeed
+                        local queueApproachCap = math.max(slowPassSpeed, 14.0 * 0.44704)
+
                         if distance > slowPassRadius then
                             local t = clamp((distance - slowPassRadius) / (approachRadius - slowPassRadius), 0.0, 1.0)
                             targetSpeed = slowPassSpeed + ((approachSpeed - slowPassSpeed) * t)
                         end
 
-                        local distanceFactor = clamp((approachRadius - distance) / approachRadius, 0.0, 1.0)
-                        local smoothStep = 1.4 + (2.0 * distanceFactor)
-                        local limitedSpeed = targetSpeed
-                        if currentSpeed > targetSpeed then
-                            limitedSpeed = math.max(targetSpeed, currentSpeed - smoothStep)
+                        if followBlocked then
+                            targetSpeed = math.min(targetSpeed, queueApproachCap)
                         end
 
-                        SetVehicleMaxSpeed(vehicle, limitedSpeed)
-                        speedLimitedVehicles[vehicle] = true
+                        local distanceFactor = clamp((approachRadius - distance) / approachRadius, 0.0, 1.0)
+                        local brakeRate = 1.8 + (3.2 * distanceFactor)
+                        applyManagedVehicleSpeedCap(vehicle, targetSpeed, now, {
+                            brakeRate = brakeRate,
+                            releaseRate = math.max(5.5, brakeRate * 1.5),
+                        })
                         SetDriverAbility(driver, 1.0)
                         SetDriverAggressiveness(driver, 0.0)
 
@@ -1304,8 +1372,11 @@ CreateThread(function()
                     bubbleStuckSince[vehicle] = nil
                     -- Vehicle is inside the bubble but approaching from the side or opposite direction.
                     -- Still enforce slow-pass speed so the bubble is respected in all lanes.
-                    SetVehicleMaxSpeed(vehicle, slowPassSpeed)
-                    speedLimitedVehicles[vehicle] = true
+                    local bubbleFactor = clamp((bubbleRadius - distance) / math.max(bubbleRadius, 1.0), 0.0, 1.0)
+                    applyManagedVehicleSpeedCap(vehicle, slowPassSpeed, now, {
+                        brakeRate = 2.2 + (3.8 * bubbleFactor),
+                        releaseRate = 5.0,
+                    })
                     SetDriverAbility(driver, 1.0)
                     SetDriverAggressiveness(driver, 0.0)
                 elseif speedLimitedVehicles[vehicle] then
@@ -1314,9 +1385,10 @@ CreateThread(function()
                     bypassPlan[vehicle] = nil
                     SetVehicleMaxSpeed(vehicle, 0.0)
                     speedLimitedVehicles[vehicle] = nil
+                    speedLimitState[vehicle] = nil
                 end
 
-                if (not isApproaching) and bypassTaskUntil[vehicle] then
+                if (not isManagedApproach) and bypassTaskUntil[vehicle] then
                     if GetGameTimer() >= bypassTaskUntil[vehicle] then
                         bypassTaskUntil[vehicle] = nil
                     end
@@ -1353,15 +1425,20 @@ CreateThread(function()
                     if avoidCoords and avoidDistance <= pedestrianResponseRadius then
                         local direction = pointDirection(vehicle, avoidCoords)
                         if direction ~= 'behind' then
+                            controlsTrafficFlow = true
                             local bypassApplied = trySafePedestrianBypass(driver, vehicle, avoidCoords, emergencyCfg, vehiclePool)
                             if bypassApplied then
                                 if speedLimitedVehicles[vehicle] then
                                     SetVehicleMaxSpeed(vehicle, 0.0)
                                     speedLimitedVehicles[vehicle] = nil
+                                    speedLimitState[vehicle] = nil
                                 end
                             else
-                                SetVehicleMaxSpeed(vehicle, pedestrianSlowSpeed)
-                                speedLimitedVehicles[vehicle] = true
+                                local pedestrianFactor = clamp((pedestrianResponseRadius - avoidDistance) / pedestrianResponseRadius, 0.0, 1.0)
+                                applyManagedVehicleSpeedCap(vehicle, pedestrianSlowSpeed, now, {
+                                    brakeRate = 2.0 + (4.5 * pedestrianFactor),
+                                    releaseRate = 5.0,
+                                })
                                 SetDriverAbility(driver, 1.0)
                                 SetDriverAggressiveness(driver, 0.0)
 
@@ -1373,17 +1450,24 @@ CreateThread(function()
                     end
                 end
 
+                if controlsTrafficFlow then
+                    VehicleControl.Claim(vehicle, TRAFFIC_CONTROL_OWNER, math.max(updateInterval + 500, emergencyCfg.safeBypassTaskMs or 0))
+                else
+                    VehicleControl.Release(vehicle, TRAFFIC_CONTROL_OWNER)
+                end
+
                 ::continue_vehicle::
             end
         end
         end
 
-        Wait(updateInterval)
+        Wait(trafficWaitMs)
     end
 end)
 
 AddEventHandler('cbk_ai:localWorldCleared', function()
     speedLimitedVehicles = {}
+    speedLimitState = {}
     hornMutedVehicles = {}
     speechMutedDrivers = {}
     globalHornMutedVehicles = {}
@@ -1391,6 +1475,7 @@ AddEventHandler('cbk_ai:localWorldCleared', function()
     bubbleStuckSince = {}
     bypassSideLock = {}
     bypassPlan = {}
+    VehicleControl.ResetOwner(TRAFFIC_CONTROL_OWNER)
 end)
 
 AddEventHandler('onResourceStop', function(resourceName)

@@ -107,7 +107,7 @@ Use this table during live tuning to avoid setting combinations that cancel each
 - Ambient ped audio, animation, and survivability: `disableAmbientSpeech`, `disableAmbientHorns`, `disablePainAudio`, `disableAmbientAnims`, `disableAmbientBaseAnims`, `disableGestureAnims`, `allowPlayerMelee`, `npcCanRagdoll`, `npcCanBeKnockedOffBike`, `canEvasiveDive`, `canCowerInCover`, `canBeTargetted`, `canBeTargettedByPlayer`, `canBeShotInVehicle`, `canBeDraggedOutOfVehicle`.
 - Ambient ped pathing: `canUseLadders`, `canUseClimbovers`, `canDropFromHeight`, `pathAvoidFire`.
 - Ambient driver control: `disableNPCDriving`, `npcDrivingStyle`, `respectTrafficLights`, `respectStopSigns`, `avoidTraffic`, `PopulationDensity.vehicleDensity`, `VehicleSettings.enableTraffic`, `VehicleSettings.maxVehicles`, `VehicleSettings.vehiclesRespectLights`, `VehicleSettings.vehiclesUseIndicators`, `VehicleSettings.enableVehicleDamage`, `VehicleSettings.vehiclesAvoidPlayer`.
-- Emergency traffic response: `VehicleSettings.emergencyVehicleBehavior.*`, including slow-pass, oncoming bypass, stopped-emergency bubbles, siren requirement, horn suppression, and speech suppression.
+- Emergency traffic response: `VehicleSettings.emergencyVehicleBehavior.*`, including slow-pass, oncoming bypass, stopped-emergency bubbles, emergency-signal requirement, optional siren-audio requirement, horn suppression, and speech suppression.
 - Ambient cleanup and world shaping: `Advanced.maxAmbientPeds`, `Advanced.autoCleanupEnabled`, `Advanced.cleanupDistance`, `Advanced.cleanupInterval`, `Advanced.deleteDeadNPCs`, `Advanced.cleanupDeadNPCsAfterMs`, `Advanced.deleteWreckedEmptyVehicles`, `Advanced.cleanupWreckedVehiclesAfterMs`, `Advanced.deleteAbandonedEmptyVehicles`, `Advanced.cleanupAbandonedVehiclesAfterMs`, `Advanced.abandonedVehicleSpeedThresholdMph`.
 - Clear-world extras: `Advanced.clearAmbientGarbageOnClear` extends `/npcclear` to include common loose trash and rubble props.
 
@@ -165,20 +165,18 @@ Recommended smoke test after config changes:
 1. Restart the resource and confirm there are no startup errors.
 2. Run `/npcstatus` and `/npcvalidate`.
 3. Toggle traffic density or scenario settings, then run `/npcreload`.
-4. Drive an emergency vehicle with sirens active and confirm traffic pulls over or slow-passes as expected.
+4. Drive an emergency vehicle with emergency lights active, and with siren audio active as well if `requireSiren = true`, and confirm traffic pulls over or slow-passes as expected.
 5. Step out on or near a road and confirm ambient traffic slows or routes around you when `vehiclesAvoidPlayer = true`.
 
-## Audit Snapshot (03-21-2026)
+## Runtime Notes (2026-04-22)
 
-- No critical exploit paths identified in the current ambient-only runtime.
-- Server-side authority, event rate limits, payload safety checks, and config normalization are present and active.
-- Medium-scale risk remains in 120-player scenarios from:
-    - 500ms traffic-context fanout that scales with player-to-player proximity checks.
-    - repeated client pool scans in high-density scenes.
+- Server-side authority, event rate limits, payload safety checks, and config normalization remain active.
+- Emergency traffic control now reserves exclusive ownership of ambient NPC drivers while slow-pass, stopped-emergency, or pedestrian-avoidance tasks are active, so the ambient driver loop does not overwrite those tasks mid-maneuver.
+- Stopped-emergency lead ownership is computed once per anchor per traffic update. Only the lead vehicle gets bypass authority; followers stay in managed slow-pass instead of stacking side-by-side passes.
+- Live panel edits are normalized with cross-field emergency invariants before broadcast. Conflicting bubble, courtesy, slow-pass, and bypass values are corrected server-side.
+- Traffic-context cadence follows `Config.Advanced.updateInterval`, clamped to a 250-1000ms active window and a 1000ms minimum when the feature is disabled.
 
-Detailed findings and recommended budgets are documented in `CODE-AUDIT-03-21-2026.md`.
-
-Recommended high-concurrency baseline:
+Recommended 120-player baseline:
 
 - `Config.Advanced.updateInterval = 1250` to `1500`
 - `Config.Advanced.maxNPCDistance = 300.0` to `400.0`

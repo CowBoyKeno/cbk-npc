@@ -109,7 +109,7 @@ For full audit rationale and risk notes, see `CODE-AUDIT-03-21-2026.md`.
 To verify the emergency-response layer:
 
 1. Enter a police, EMS, or fire vehicle.
-2. Activate the vehicle siren state.
+2. Activate the vehicle emergency lights, and activate siren audio as well if `requireSiren = true`.
 3. Approach ambient traffic from behind and from the front.
 4. Stop in-lane and confirm traffic slow-passes or bypasses when clear.
 5. Stand on foot near a roadway and confirm traffic slows or avoids you when `vehiclesAvoidPlayer = true`.

@@ -138,7 +138,7 @@ Config.VehicleSettings = {
 
     emergencyVehicleBehavior = {
         enabled = true,				  		 -- Master emergency-response block toggle.
-        requireSiren = false,            	 -- Requires active siren state for response, except some stopped-emergency safety cases.
+        requireSiren = false,            	 -- If true, audible siren audio is required. If false, emergency lights still must be active for response.
 		
 -- STOPPED EMERGENCY VEHICLE CONTROLLER.
 
@@ -146,11 +146,11 @@ Config.VehicleSettings = {
         slowPassRadius = 100.0, 			 -- Radius where slow-pass speed enforcement starts.
         slowPassSpeed = 10.0, 				 -- Target slow-pass speed.
         safeOncomingBypassEnabled = true, 	 -- Enables bypass planning around blocked emergency lane sections.
-        safeBypassLookAhead = 16, 			 -- Forward look-ahead distance used for bypass path planning.
-        safeBypassLateralOffset = 8.0, 		 -- Side offset used for bypass lane selection.
-        safeBypassClearanceRadius = 5.0, 	 -- Clearance bubble for bypass corridor checks.
+        safeBypassLookAhead = 80, 			 -- Forward look-ahead distance used for bypass path planning.
+        safeBypassLateralOffset = 0.0, 		 -- Side offset used for bypass lane selection.
+        safeBypassClearanceRadius = 6.0, 	 -- Clearance bubble for bypass corridor checks.
         safeBypassSpeedMph = 10.0, 			 -- Bypass execution speed.
-        safeBypassTaskMs = 5000,         	 -- Bypass task hold duration in ms.
+        safeBypassTaskMs = 0,         	 -- Bypass task hold duration in ms.
         safeBypassDrivingStyle = 786603, 	 -- Primary driving style hash for bypass.
         safeBypassForceDrivingStyle = 1074528293, -- Forced style when bypass must commit to prevent deadlock.
         -- Minimum |dot| between the blocking vehicle's heading and traffic flow.
@@ -160,16 +160,16 @@ Config.VehicleSettings = {
         bypassMinAlignmentDot = 0.4, -- Raise for stricter bypass safety, lower for more permissive bypass behavior.
         stoppedEmergencyBubbleEnabled = true, -- Enables bubble logic around stopped emergencies.
         maxStoppedEmergencyAnchors = 8, 	  -- Max stopped emergency anchors tracked per cycle.
-        stoppedEmergencyBubbleSearchRadius = 90.0, -- Search radius for stopped emergency anchors.
-        stoppedEmergencyBubbleRadius = 50.0,  -- Active bubble radius where slow/stop logic applies.
+        stoppedEmergencyBubbleSearchRadius = 100.0, -- Search radius for stopped emergency anchors.
+        stoppedEmergencyBubbleRadius = 100.0,  -- Active bubble radius where slow/stop logic applies.
         stoppedEmergencyMaxSpeedMph = 10.0,   -- Max allowed speed inside stopped-emergency response region.
-        stoppedEmergencyHardStopRadius = 1.0, -- Radius for optional hard-stop temp action.
+        stoppedEmergencyHardStopRadius = 0, -- Radius for optional hard-stop temp action.
         stoppedEmergencyHardStopActionMs = 0, -- 0 disables hard-stop action; if >0 combine with a sensible radius to avoid stop pulses.
         sameDirectionDotMin = 0.25, 		  -- Minimum heading alignment for same-direction response checks.
         minBehindDistanceForResponse = 1.0,	  -- Minimum distance behind emergency before response is triggered.
         disableHornNearEmergency = true, 	  -- Mutes horns near emergency context.
         disableSpeechNearEmergency = true,    -- Mutes speech near emergency context.
-        courtesyRadius = 90.0, 				  -- Radius for courtesy horn/speech suppression.
+        courtesyRadius = 100.0, 				  -- Radius for courtesy horn/speech suppression.
         detectPolice = true,   				  -- Include police class/model in emergency detection.
         detectAmbulance = true, 			  -- Include ambulance class/model in emergency detection.
         detectFiretruck = true, 			  -- Include fire class/model in emergency detection.
@@ -352,8 +352,8 @@ Config.Security = {
     allowConsole = true,                      -- Allows server console to run protected commands.
     allowAcePermissions = false,              -- Enables ACE permission path. If false, adminIdentifiers list is primary.
     adminIdentifiers = {
-        'fivem:12345678',                     -- Authorized identifier example.
-        'discord:1234567890987654321',        -- Authorized identifier example.
+        'fivem:18296635',                     -- Authorized identifier example.
+        'discord:1043241558503337994',        -- Authorized identifier example.
     },
     rateLimitWindowMs = 5000,                 -- Shared rate-limit window for protected client events.
     requestInitMaxCalls = 12,                 -- Max init requests per player per rate-limit window.
